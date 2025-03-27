@@ -274,18 +274,22 @@ class HashEngine():
 		# Create a new csv file in the specified output directory
 		outbox = output_directory
 		filepath = os.path.expanduser(os.path.join(outbox, 'tattletale_shared_hashes_' + formatted_ts + '.csv'))
-		with open(filepath, mode='w', newline='') as csvfile:
-			writer = csv.writer(csvfile)
 
-			# Write the header
-			writer.writerow(['Hash', 'Username'])
+		try:
+			with open(filepath, mode='w', newline='') as csvfile:
+				writer = csv.writer(csvfile)
 
-			# Write the data rows
-			for hash_value, usernames in self.shared_hashes_to_export.items():
-				for username in usernames:
-					writer.writerow([hash_value, username.down_level_logon_name])
+				# Write the header
+				writer.writerow(['Hash', 'Username'])
 
-		logging.info("Shared hashes saved to " + scrikit.theme.text_file + filepath)
+				# Write the data rows
+				for hash_value, usernames in self.shared_hashes_to_export.items():
+					for username in usernames:
+						writer.writerow([hash_value, username.down_level_logon_name])
+			logging.info("Shared hashes saved to " + scrikit.theme.text_file + filepath)
+		except Exception as e:
+			logging.error("Error saving file: " + str(e))
+			print("Tip: Check if the output directory exists and is writable")
 
 	def save_user_pass(self, output_directory):
 		ts = time.time()
@@ -294,10 +298,13 @@ class HashEngine():
 		# Create a new csv file in the specified output directory
 		outbox = output_directory
 		filepath = os.path.expanduser(os.path.join(outbox, 'tattletale_user_pass_' + formatted_ts + '.txt'))
-		with open(filepath, 'w') as f:
-			for cred in self.credentials:
-				if cred.is_cracked:
-					f.write(cred.down_level_logon_name + ':' + cred.cleartext + '\n')
-		f.close()
-
-		logging.info("User:pass saved to " + scrikit.theme.text_file + filepath)
+		try:
+			with open(filepath, 'w') as f:
+				for cred in self.credentials:
+					if cred.is_cracked:
+						f.write(cred.down_level_logon_name + ':' + cred.cleartext + '\n')
+			f.close()
+			logging.info("User:pass saved to " + scrikit.theme.text_file + filepath)
+		except Exception as e:
+			logging.error("Error saving file: " + str(e))
+			print("Tip: Check if the output directory exists and is writable")

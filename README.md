@@ -8,20 +8,27 @@ TattleTale is an open-source tool designed to analyze and reveal secrets from NT
 
 ## Installation
 
-Download the source code with git, and use the makefile to initialize a Python virtual environment with the required dependencies:
+Run the following commands to download the source code and create a virtual environment:
 
 ```
+git clone https://github.com/coryavra/tattletale.git
+cd tattletale
 make
 ```
 
-Then run with:
+Then, activate the virutla environment:
+```
+source .venv/bin/activate
+```
+
+Finally, run with:
 
 ```
 ./tattletale.py -d DITFILES [DITFILES ...] [-p POTFILES [POTFILES ...]] [-t TARGETFILES [TARGETFILES ...]] [-o OUTPUT]
 ```
 
-Each flag can take multiple arguments. Here's an example that analyzes 2 ditfiles and 2 target files:
+Each flag can take multiple arguments. The output flag takes an existing directory, not a filename. Here's an example that analyzes 2 ditfiles and 2 target files:
 
 ```
-./tattletale.py --ditfiles ntds1.dit ntds2.dit -potfiles hashes.pot --targetfiles domain_admins.txt enterprise_admins.txt
+./tattletale.py --ditfiles ntds1.dit ntds2.dit -potfiles hashes.pot --targetfiles domain_admins.txt enterprise_admins.txt --output /path/to/existing/directory
 ```
