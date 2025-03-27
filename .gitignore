@@ -1,0 +1,12 @@
+# Virtual environment folders
+venv/
+.env/
+.venv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# macOS Finder metadata
+.DS_Store
