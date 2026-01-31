@@ -1,0 +1,47 @@
+# Sample hashcat potfile
+# Real NT hashes - will crack correctly in hashcat
+# Format: NT_HASH:cleartext
+
+# Common weak passwords
+64f12cddaa88057e06a81b54e73b949b:Password1
+72f0eefcc213ea8f350773b831cf2c9c:Summer2024!
+316c5ae8a7b5dfce4a5604d17d9e976e:Welcome123
+bb133c948cac92c1afb921a1a7128e54:January2024
+32ed87bdb5fdc5e9cba88547376818d4:123456
+8846f7eaee8fb117ad06bdd830b7586c:password
+259745cb123a52aa2e693aaacca2db52:12345678
+
+# Service account passwords
+db8f100fa6ad78939a90aec7d807849b:Servicep@ss1
+de769e624bfe51cb4109255f0f1e0910:Backup2024!
+c93bd3896cc175176ffb84731c3a448d:W$us2024
+0fd51666def304a5ca7ce511b375d508:WebServer1!
+c3951ddb4ed0f4a3ab49f2017b71a1ea:Jenkins2024
+
+# Security team (finally, someone with a real passphrase)
+6a066c4cce120bb4b7d28727c5bd5730:MyUltr@Secure25CharP@ss!!
+
+# Department passwords
+997552a506abd38745b6071bdd2cb093:HRpassw0rd!
+ca4d343543c50f99cececfe83bddd4c1:Finance2024!
+e0fd207483b901ec8171f2ef87ca6167:Budget2024
+f126d045ae0e4dccad82c6c42550af20:Sales2024!
+8af326aa4850225b75c592d4ce19ccf5:1234567890
+
+# Engineering passwords
+e96bb4708669b7515102f3d197506354:D3v3l0p3r!
+c2ff1de7d210a5208b7d70f35b6b982a:C0d3r2024!
+e589a717bb6b4f27af43e97d5edaaec7:T3chN1c@l
+44bf0244f032ca8baaddda0fa9328bf8:Qwerty123!
+
+# IT department
+becedb42ec3c5c7f965255338be4453c:letmein
+520126a03f5d5a8d836f1c4f34ede7ce:Admin123!
+
+# Old passwords (showing password age)
+1b19b136b7f27225b899ba80aeea4a18:Winter2023!
+a243ea0a666107e5946362230e328cf3:Spring2023
+0d5d5a678af6be6d6de025e9e6aa03e7:Fall2022!
+
+# App service accounts
+43f91cc95d9c04eea33c6623410ac8eb:Oracle2024!

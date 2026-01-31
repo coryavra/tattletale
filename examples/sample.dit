@@ -1,0 +1,155 @@
+# Sample NTDS.DIT dump (secretsdump format)
+# Synthetic data with REAL NT hashes - will match hashcat output
+# Format: DOMAIN\user:RID:LM_HASH:NT_HASH:::
+
+# Null LM hash (standard when LM is disabled)
+# aad3b435b51404eeaad3b435b51404ee
+
+# Null NT hash (empty password)
+# 31d6cfe0d16ae931b73c59d7e0c089c0
+
+# =============================================================================
+# CONTOSO.CORP - Primary Domain
+# =============================================================================
+
+# Domain Admins (Password1 = 64f12cddaa88057e06a81b54e73b949b)
+CONTOSO\Administrator:500:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
+CONTOSO\da_johnson:1001:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
+CONTOSO\da_smith:1002:aad3b435b51404eeaad3b435b51404ee:72f0eefcc213ea8f350773b831cf2c9c:::
+CONTOSO\da_williams:1003:aad3b435b51404eeaad3b435b51404ee:bb133c948cac92c1afb921a1a7128e54:::
+CONTOSO\admin.backup:1004:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
+
+# Enterprise Admins (Servicep@ss1 = db8f100fa6ad78939a90aec7d807849b)
+CONTOSO\ea_chen:1010:aad3b435b51404eeaad3b435b51404ee:db8f100fa6ad78939a90aec7d807849b:::
+CONTOSO\ea_rodriguez:1011:aad3b435b51404eeaad3b435b51404ee:db8f100fa6ad78939a90aec7d807849b:::
+
+# Service Accounts - IT
+CONTOSO\svc_sql:1100:aad3b435b51404eeaad3b435b51404ee:316c5ae8a7b5dfce4a5604d17d9e976e:::
+CONTOSO\svc_sqlprod:1101:aad3b435b51404eeaad3b435b51404ee:316c5ae8a7b5dfce4a5604d17d9e976e:::
+CONTOSO\svc_backup:1102:aad3b435b51404eeaad3b435b51404ee:316c5ae8a7b5dfce4a5604d17d9e976e:::
+CONTOSO\svc_veeam:1103:aad3b435b51404eeaad3b435b51404ee:de769e624bfe51cb4109255f0f1e0910:::
+CONTOSO\svc_sccm:1104:aad3b435b51404eeaad3b435b51404ee:de769e624bfe51cb4109255f0f1e0910:::
+CONTOSO\svc_wsus:1105:aad3b435b51404eeaad3b435b51404ee:c93bd3896cc175176ffb84731c3a448d:::
+CONTOSO\svc_adfs:1106:aad3b435b51404eeaad3b435b51404ee:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6:::
+CONTOSO\svc_exchange:1107:aad3b435b51404eeaad3b435b51404ee:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6:::
+
+# Service Accounts - Applications
+CONTOSO\svc_sap:1110:aad3b435b51404eeaad3b435b51404ee:43f91cc95d9c04eea33c6623410ac8eb:::
+CONTOSO\svc_oracle:1111:aad3b435b51404eeaad3b435b51404ee:43f91cc95d9c04eea33c6623410ac8eb:::
+CONTOSO\svc_web:1112:aad3b435b51404eeaad3b435b51404ee:0fd51666def304a5ca7ce511b375d508:::
+CONTOSO\svc_iis:1113:aad3b435b51404eeaad3b435b51404ee:0fd51666def304a5ca7ce511b375d508:::
+CONTOSO\svc_tomcat:1114:aad3b435b51404eeaad3b435b51404ee:0fd51666def304a5ca7ce511b375d508:::
+CONTOSO\svc_jenkins:1115:aad3b435b51404eeaad3b435b51404ee:c3951ddb4ed0f4a3ab49f2017b71a1ea:::
+
+# IT Department
+CONTOSO\jsmith:2001:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
+CONTOSO\bjohnson:2002:aad3b435b51404eeaad3b435b51404ee:72f0eefcc213ea8f350773b831cf2c9c:::
+CONTOSO\mwilliams:2003:aad3b435b51404eeaad3b435b51404ee:bb133c948cac92c1afb921a1a7128e54:::
+CONTOSO\dgarcia:2004:aad3b435b51404eeaad3b435b51404ee:bb133c948cac92c1afb921a1a7128e54:::
+CONTOSO\klee:2005:aad3b435b51404eeaad3b435b51404ee:becedb42ec3c5c7f965255338be4453c:::
+CONTOSO\tchen:2006:aad3b435b51404eeaad3b435b51404ee:becedb42ec3c5c7f965255338be4453c:::
+CONTOSO\rpatel:2007:aad3b435b51404eeaad3b435b51404ee:520126a03f5d5a8d836f1c4f34ede7ce:::
+CONTOSO\akim:2008:aad3b435b51404eeaad3b435b51404ee:520126a03f5d5a8d836f1c4f34ede7ce:::
+
+# Security Team (the one guy who actually uses a passphrase)
+CONTOSO\sec_analyst:2009:aad3b435b51404eeaad3b435b51404ee:6a066c4cce120bb4b7d28727c5bd5730:::
+
+# HR Department
+CONTOSO\hr_manager:2100:aad3b435b51404eeaad3b435b51404ee:997552a506abd38745b6071bdd2cb093:::
+CONTOSO\lthompson:2101:aad3b435b51404eeaad3b435b51404ee:997552a506abd38745b6071bdd2cb093:::
+CONTOSO\smartin:2102:aad3b435b51404eeaad3b435b51404ee:997552a506abd38745b6071bdd2cb093:::
+CONTOSO\janderson:2103:aad3b435b51404eeaad3b435b51404ee:259745cb123a52aa2e693aaacca2db52:::
+CONTOSO\ctaylor:2104:aad3b435b51404eeaad3b435b51404ee:259745cb123a52aa2e693aaacca2db52:::
+
+# Finance Department
+CONTOSO\cfo_davis:2200:aad3b435b51404eeaad3b435b51404ee:ca4d343543c50f99cececfe83bddd4c1:::
+CONTOSO\fmoore:2201:aad3b435b51404eeaad3b435b51404ee:ca4d343543c50f99cececfe83bddd4c1:::
+CONTOSO\sjackson:2202:aad3b435b51404eeaad3b435b51404ee:ca4d343543c50f99cececfe83bddd4c1:::
+CONTOSO\dwhite:2203:aad3b435b51404eeaad3b435b51404ee:e0fd207483b901ec8171f2ef87ca6167:::
+
+# Users with older passwords (haven't rotated)
+CONTOSO\neglected1:2210:aad3b435b51404eeaad3b435b51404ee:1b19b136b7f27225b899ba80aeea4a18:::
+CONTOSO\neglected2:2211:aad3b435b51404eeaad3b435b51404ee:a243ea0a666107e5946362230e328cf3:::
+CONTOSO\ancient_acct:2212:aad3b435b51404eeaad3b435b51404ee:0d5d5a678af6be6d6de025e9e6aa03e7:::
+CONTOSO\bharris:2204:aad3b435b51404eeaad3b435b51404ee:e0fd207483b901ec8171f2ef87ca6167:::
+CONTOSO\nclark:2205:aad3b435b51404eeaad3b435b51404ee:32ed87bdb5fdc5e9cba88547376818d4:::
+
+# Sales Department
+CONTOSO\sales_director:2300:aad3b435b51404eeaad3b435b51404ee:f126d045ae0e4dccad82c6c42550af20:::
+CONTOSO\rlewis:2301:aad3b435b51404eeaad3b435b51404ee:f126d045ae0e4dccad82c6c42550af20:::
+CONTOSO\jyoung:2302:aad3b435b51404eeaad3b435b51404ee:f126d045ae0e4dccad82c6c42550af20:::
+CONTOSO\kwang:2303:aad3b435b51404eeaad3b435b51404ee:f126d045ae0e4dccad82c6c42550af20:::
+CONTOSO\mallen:2304:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::
+CONTOSO\pscott:2305:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::
+CONTOSO\lgreen:2306:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::
+CONTOSO\badams:2307:aad3b435b51404eeaad3b435b51404ee:8af326aa4850225b75c592d4ce19ccf5:::
+
+# Engineering Department
+CONTOSO\eng_lead:2400:aad3b435b51404eeaad3b435b51404ee:e96bb4708669b7515102f3d197506354:::
+CONTOSO\tnelson:2401:aad3b435b51404eeaad3b435b51404ee:e96bb4708669b7515102f3d197506354:::
+CONTOSO\jhill:2402:aad3b435b51404eeaad3b435b51404ee:e96bb4708669b7515102f3d197506354:::
+CONTOSO\sramirez:2403:aad3b435b51404eeaad3b435b51404ee:c2ff1de7d210a5208b7d70f35b6b982a:::
+CONTOSO\dcampbell:2404:aad3b435b51404eeaad3b435b51404ee:c2ff1de7d210a5208b7d70f35b6b982a:::
+CONTOSO\mmitchell:2405:aad3b435b51404eeaad3b435b51404ee:e589a717bb6b4f27af43e97d5edaaec7:::
+CONTOSO\jroberts:2406:aad3b435b51404eeaad3b435b51404ee:e589a717bb6b4f27af43e97d5edaaec7:::
+CONTOSO\cturner:2407:aad3b435b51404eeaad3b435b51404ee:44bf0244f032ca8baaddda0fa9328bf8:::
+
+# Executives
+CONTOSO\ceo:2500:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
+CONTOSO\coo:2501:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
+CONTOSO\cto:2502:aad3b435b51404eeaad3b435b51404ee:44bf0244f032ca8baaddda0fa9328bf8:::
+
+# Contractors/Temps
+CONTOSO\contractor1:2600:aad3b435b51404eeaad3b435b51404ee:32ed87bdb5fdc5e9cba88547376818d4:::
+CONTOSO\contractor2:2601:aad3b435b51404eeaad3b435b51404ee:32ed87bdb5fdc5e9cba88547376818d4:::
+CONTOSO\temp_user1:2602:aad3b435b51404eeaad3b435b51404ee:259745cb123a52aa2e693aaacca2db52:::
+CONTOSO\intern_summer:2603:aad3b435b51404eeaad3b435b51404ee:259745cb123a52aa2e693aaacca2db52:::
+
+# Legacy accounts with LM hashes (security finding)
+# LM hashes are real too - first half of "Password1" split
+CONTOSO\legacy_admin:3001:e52cac67419a9a224a3b108f3fa6cb6d:64f12cddaa88057e06a81b54e73b949b:::
+CONTOSO\old_backup:3002:92937945b518814341849c1ab54cf719:316c5ae8a7b5dfce4a5604d17d9e976e:::
+CONTOSO\win2003_svc:3003:a0e150c75a17008eaad3b435b51404ee:c93bd3896cc175176ffb84731c3a448d:::
+CONTOSO\legacy_app:3004:f0d412bd764ffe81aad3b435b51404ee:43f91cc95d9c04eea33c6623410ac8eb:::
+
+# Disabled/Empty password accounts (null NT hash)
+CONTOSO\Guest:501:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::
+CONTOSO\disabled_user:2700:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::
+CONTOSO\test_account:2701:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::
+CONTOSO\old_employee:2702:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::
+CONTOSO\deprovisioned:2703:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::
+
+# Machine Accounts (random hashes - these wouldn't be crackable anyway)
+CONTOSO\DC01$:1000:aad3b435b51404eeaad3b435b51404ee:b9e0cfceaf6d077970306a2fd88a7c0a:::
+CONTOSO\DC02$:1005:aad3b435b51404eeaad3b435b51404ee:c5a237b7e9d8e708d8436b6148a25fa1:::
+CONTOSO\FILESERVER$:1006:aad3b435b51404eeaad3b435b51404ee:d7e4a8b3c2f1e609a9d58c7b1a2e3f4c:::
+CONTOSO\WEBSERVER$:1007:aad3b435b51404eeaad3b435b51404ee:e8f5b9c4d3e2f1a0b9c8d7e6f5a4b3c2:::
+CONTOSO\SQLSERVER$:1008:aad3b435b51404eeaad3b435b51404ee:f9a6c0d5e4f3a2b1c0d9e8f7a6b5c4d3:::
+CONTOSO\EXCHANGE$:1009:aad3b435b51404eeaad3b435b51404ee:a0b7d1e6f5a4b3c2d1e0f9a8b7c6d5e4:::
+CONTOSO\WORKSTATION001$:1020:aad3b435b51404eeaad3b435b51404ee:b1c8e2f7a6b5c4d3e2f1a0b9c8d7e6f5:::
+CONTOSO\WORKSTATION002$:1021:aad3b435b51404eeaad3b435b51404ee:c2d9f3a8b7c6d5e4f3a2b1c0d9e8f7a6:::
+CONTOSO\LAPTOP-JSMITH$:1030:aad3b435b51404eeaad3b435b51404ee:d3e0a4b9c8d7e6f5a4b3c2d1e0f9a8b7:::
+CONTOSO\LAPTOP-BJOHNSON$:1031:aad3b435b51404eeaad3b435b51404ee:e4f1b5c0d9e8f7a6b5c4d3e2f1a0b9c8:::
+
+# =============================================================================
+# YOURCOMPANY.CONTOSO.CORP - Child Domain
+# =============================================================================
+
+# Subsidiary Admins
+YOURCOMPANY\Administrator:500:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
+YOURCOMPANY\da_brown:1001:aad3b435b51404eeaad3b435b51404ee:72f0eefcc213ea8f350773b831cf2c9c:::
+
+# Subsidiary Service Accounts
+YOURCOMPANY\svc_app:1100:aad3b435b51404eeaad3b435b51404ee:316c5ae8a7b5dfce4a5604d17d9e976e:::
+YOURCOMPANY\svc_db:1101:aad3b435b51404eeaad3b435b51404ee:316c5ae8a7b5dfce4a5604d17d9e976e:::
+
+# Subsidiary Users
+YOURCOMPANY\alopez:2001:aad3b435b51404eeaad3b435b51404ee:bb133c948cac92c1afb921a1a7128e54:::
+YOURCOMPANY\mperez:2002:aad3b435b51404eeaad3b435b51404ee:bb133c948cac92c1afb921a1a7128e54:::
+YOURCOMPANY\jgonzalez:2003:aad3b435b51404eeaad3b435b51404ee:becedb42ec3c5c7f965255338be4453c:::
+YOURCOMPANY\rflores:2004:aad3b435b51404eeaad3b435b51404ee:becedb42ec3c5c7f965255338be4453c:::
+YOURCOMPANY\crivera:2005:aad3b435b51404eeaad3b435b51404ee:997552a506abd38745b6071bdd2cb093:::
+
+# Subsidiary Machine Accounts
+YOURCOMPANY\SUBDC01$:1000:aad3b435b51404eeaad3b435b51404ee:a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0:::
+YOURCOMPANY\SUBFILE$:1002:aad3b435b51404eeaad3b435b51404ee:b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1:::

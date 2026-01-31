@@ -1,0 +1,13 @@
+# Domain Admins and Enterprise Admins
+# These accounts have domain-wide privileges
+
+# Domain Admins
+Administrator
+da_johnson
+da_smith
+da_williams
+admin.backup
+
+# Enterprise Admins
+ea_chen
+ea_rodriguez

@@ -1,34 +1,140 @@
 # TattleTale
 
-![TattleTale Logo](https://raw.githubusercontent.com/coryavra/tattletale/master/images/logo.png)
+Post-exploitation NTDS dump analyzer for penetration testing. Analyzes secretsdump output, correlates with hashcat potfiles, and identifies password reuse across accounts.
 
-## Description
+## Features
 
-TattleTale is an open-source tool designed to analyze and reveal secrets from NTDS.dit dumpfiles. It is intended to be used by penetration testers and cybersecurity professionals in the post-exploitation phase, or also by IT professionals who want to audit their Active Directory environment.
+- Parses multiple DIT files (multi-domain analysis)
+- Correlates with hashcat potfiles
+- Identifies high-value targets (domain admins, service accounts)
+- Detects shared password hashes across accounts
+- Password pattern analysis (seasons, months, years, common bases)
+- Statistics: cracking rates, LM vs NT, unique hashes
+- Exports cracked credentials and shared hash reports
+- Redaction options for sharing reports
 
 ## Installation
 
-Run the following commands to download the source code and create a virtual environment:
+### Python (Recommended)
 
-```
-git clone https://github.com/coryavra/tattletale.git
-cd tattletale
-make
-```
+Standalone Python 3.10+ with no external dependencies.
 
-Then, activate the virutla environment:
-```
-source .venv/bin/activate
-```
+```bash
+# Run directly
+python3 tattletale.py -d ntds.dit -p cracked.pot
 
-Finally, run with:
-
-```
-./tattletale.py -d DITFILES [DITFILES ...] [-p POTFILES [POTFILES ...]] [-t TARGETFILES [TARGETFILES ...]] [-o OUTPUT]
+# Or make executable
+chmod +x tattletale.py
+./tattletale.py -d ntds.dit -p cracked.pot
 ```
 
-Each flag can take multiple arguments. The output flag takes an existing directory, not a filename. Here's an example that analyzes 2 ditfiles and 2 target files:
+### Containers
+
+The included `Containerfile` is OCI-compatible and works with both Docker and Apple Containers.
+
+**Docker:**
+
+```bash
+docker build -t tattletale .
+
+docker run --rm -v "$(pwd)/data:/mnt/shared" tattletale \
+    python3 tattletale.py \
+    -d /mnt/shared/ntds.dit \
+    -p /mnt/shared/cracked.pot \
+    -o /mnt/shared/report
+```
+
+**Apple Containers (macOS 26+):**
+
+```bash
+container build --tag tattletale .
+
+container run --rm \
+    --volume /tmp/container/tattletale:/mnt/shared \
+    tattletale \
+    python3 tattletale.py \
+    -d /mnt/shared/ntds.dit \
+    -p /mnt/shared/cracked.pot
+```
+
+### Makefile
+
+The `Makefile` is for **Apple Containers only** (macOS 26+ with the native containerization framework). It provides convenience targets for building, running, and managing containers.
+
+```bash
+make build    # Build the container image
+make run      # Build and run interactively (files in /tmp/container/tattletale/)
+make test     # Run unit tests
+make clean    # Remove image and prune resources
+make help     # Show all targets
+```
+
+## Usage
 
 ```
-./tattletale.py --ditfiles ntds1.dit ntds2.dit -potfiles hashes.pot --targetfiles domain_admins.txt enterprise_admins.txt --output /path/to/existing/directory
+USAGE
+    tattletale -d <ditfile> [-p <potfile>] [-t <targets>] [options]
+
+REQUIRED
+    -d, --ditfiles <file>...    NTDS.DIT dump file(s) from secretsdump
+
+OPTIONS
+    -p, --potfiles <file>...    Hashcat potfile(s) with cracked hashes
+    -t, --targetfiles <file>... Target lists (domain admins, service accounts)
+    -o, --output <dir>          Export reports to directory
+    --redact-full               Hide passwords completely (********)
+    --redact-partial            Show first two chars only (Pa******)
+    -q, --quiet                 Suppress banner and status messages
+    -h, --help                  Show help message
 ```
+
+## Examples
+
+```bash
+# Basic analysis
+python3 tattletale.py -d ntds.dit
+
+# With cracked hashes
+python3 tattletale.py -d ntds.dit -p hashcat.potfile
+
+# Full analysis with targets and export
+python3 tattletale.py -d ntds.dit -p cracked.pot -t domain_admins.txt -o ./report
+
+# Redacted output for client reports
+python3 tattletale.py -d ntds.dit -p cracked.pot --redact-partial -o ./report
+
+# Run with example data
+python3 tattletale.py -d examples/sample.dit -p examples/sample.pot -t examples/targets.txt
+```
+
+## Input Formats
+
+| File Type | Format | Example |
+|-----------|--------|---------|
+| DIT dump | secretsdump output | `DOMAIN\user:1001:LM_HASH:NT_HASH:::` |
+| Potfile | hashcat potfile | `NT_HASH:cleartext` |
+| Targets | one username per line | `administrator` |
+
+## Output
+
+The tool produces:
+
+- **Statistics**: Account counts, cracking progress, hash types
+- **High Value Targets**: Status of priority accounts (if target file provided)
+- **Shared Credentials**: Accounts sharing the same password hash
+- **Password Analysis**: Common patterns, base words, length distribution
+- **Export Files**: `cracked_credentials.txt` and `shared_hashes.txt`
+
+## Testing
+
+```bash
+# Run unit tests
+python3 tests/test_tattletale.py
+
+# Or via Makefile (Apple Containers)
+make test
+```
+
+## License
+
+MIT

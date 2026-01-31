@@ -1,12 +1,26 @@
-# Virtual environment folders
-venv/
-.env/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
 .venv/
+venv/
+ENV/
 
-# Distribution / packaging
-build/
-dist/
-*.egg-info/
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# macOS Finder metadata
+# OS
 .DS_Store
+Thumbs.db
+
+# Output
+/report/
+*.log
+
+# Container artifacts
+*.tar

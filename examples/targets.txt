@@ -1,0 +1,29 @@
+# High-value targets (one per line)
+# Domain Admins, Enterprise Admins, Executives, Service Accounts
+
+# Domain Admins
+Administrator
+da_johnson
+da_smith
+da_williams
+admin.backup
+
+# Enterprise Admins
+ea_chen
+ea_rodriguez
+
+# Executives
+ceo
+coo
+cto
+cfo_davis
+
+# Service Accounts - Critical
+svc_sql
+svc_sqlprod
+svc_backup
+svc_exchange
+svc_adfs
+
+# Legacy (high risk)
+legacy_admin
