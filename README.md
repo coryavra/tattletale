@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-![TattleTale](assets/tt_logo.png)
+![Help](assets/tt_help.png)
 
 Analyze secretsdump output and hashcat potfiles to find shared passwords, weak credentials, and other issues in Active Directory. No dependencies.
 
@@ -68,8 +68,6 @@ docker run --rm -v "$(pwd)/data:/mnt/shared" tattletale \
 ```
 
 ## Usage
-
-![Help](assets/tt_help.png)
 
 ```
 tattletale -d <file> [-p <file>] [-t <files>] [options]
