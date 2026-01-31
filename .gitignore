@@ -1,26 +1,24 @@
+# Hidden directories (IDE, tools, OS)
+.*/
+.DS_Store
+
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
-.Python
-.venv/
 venv/
-ENV/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
 
 # Output
 /report/
-*.log
+tt-*.txt
+tt-*.csv
+
+# Potentially sensitive data
+*.dit
+*.ntds
+*.pot
+!examples/*.dit
+!examples/*.pot
 
 # Container artifacts
 *.tar

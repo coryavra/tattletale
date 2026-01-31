@@ -1,139 +1,157 @@
 # TattleTale
 
-Post-exploitation NTDS dump analyzer for penetration testing. Analyzes secretsdump output, correlates with hashcat potfiles, and identifies password reuse across accounts.
+[![PyPI version](https://img.shields.io/pypi/v/ntds-tattletale)](https://pypi.org/project/ntds-tattletale/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/ntds-tattletale)](https://pypi.org/project/ntds-tattletale/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-## Features
+![TattleTale](assets/tt_logo.png)
 
-- Parses multiple DIT files (multi-domain analysis)
-- Correlates with hashcat potfiles
-- Identifies high-value targets (domain admins, service accounts)
-- Detects shared password hashes across accounts
-- Password pattern analysis (seasons, months, years, common bases)
-- Statistics: cracking rates, LM vs NT, unique hashes
-- Exports cracked credentials and shared hash reports
-- Redaction options for sharing reports
+Analyze secretsdump output and hashcat potfiles to find shared passwords, weak credentials, and other issues in Active Directory. No dependencies.
 
-## Installation
+Built from years of hands-on experience in enterprise penetration testing. Used in real-world assessments of Fortune 500 companies and critical infrastructure.
 
-### Python (Recommended)
+## What it does
 
-Standalone Python 3.10+ with no external dependencies.
+So you've dumped the NTDS.dit and cracked some hashes, but you're left with a wall of text. TattleTale simply surfaces what the data is hiding:
+
+- **Shared credentials** - IT manager uses the same password for both of his accounts
+- **Weak privileged accounts** - 4 domain admins cracked in under an hour
+- **Password patterns** - 60% of passwords follow `Season+Year` format
+- **Legacy security issues** - service accounts still have LM hashes enabled
+- **Empty passwords** - accounts with no password set (often disabled, but verify)
+- **Policy violations** - passwords that don't meet length/complexity requirements
+
+It also tracks high-value targets across multiple lists (domain admins, service accounts, executives) so you can see exactly which critical accounts were compromised at a glance, and if any of those accounts are sharing passwords elsewhere...
+
+## Install
+
+### pip
 
 ```bash
-# Run directly
-python3 tattletale.py -d ntds.dit -p cracked.pot
-
-# Or make executable
-chmod +x tattletale.py
-./tattletale.py -d ntds.dit -p cracked.pot
+pip install ntds-tattletale
 ```
 
-### Containers
-
-The included `Containerfile` is OCI-compatible and works with both Docker and Apple Containers.
-
-**Docker:**
+Then run it:
 
 ```bash
-docker build -t tattletale .
+tattletale -d dump.ntds -p cracked.pot
+```
 
+### Standalone
+
+It's a single Python file with no dependencies. Grab it and go:
+
+```bash
+curl -O https://raw.githubusercontent.com/coryavra/tattletale/master/tattletale.py
+python3 tattletale.py -d dump.ntds -p cracked.pot
+```
+
+### Container
+
+The included `Containerfile` works with [Apple Containers](https://github.com/apple/containerization) (macOS 26+) and Docker (OCI-compliant).
+
+```bash
+# Apple Containers (native to macOS)
+container build -t tattletale .
+container run --rm -v "$(pwd)/data:/mnt/shared" tattletale \
+    -d /mnt/shared/ntds.dit \
+    -p /mnt/shared/cracked.pot \
+    -o /mnt/shared/report
+
+# Docker works too
+docker build -t tattletale .
 docker run --rm -v "$(pwd)/data:/mnt/shared" tattletale \
-    python3 tattletale.py \
     -d /mnt/shared/ntds.dit \
     -p /mnt/shared/cracked.pot \
     -o /mnt/shared/report
 ```
 
-**Apple Containers (macOS 26+):**
-
-```bash
-container build --tag tattletale .
-
-container run --rm \
-    --volume /tmp/container/tattletale:/mnt/shared \
-    tattletale \
-    python3 tattletale.py \
-    -d /mnt/shared/ntds.dit \
-    -p /mnt/shared/cracked.pot
-```
-
-### Makefile
-
-The `Makefile` is for **Apple Containers only** (macOS 26+ with the native containerization framework). It provides convenience targets for building, running, and managing containers.
-
-```bash
-make build    # Build the container image
-make run      # Build and run interactively (files in /tmp/container/tattletale/)
-make test     # Run unit tests
-make clean    # Remove image and prune resources
-make help     # Show all targets
-```
-
 ## Usage
 
+![Help](assets/tt_help.png)
+
 ```
-USAGE
-    tattletale -d <ditfile> [-p <potfile>] [-t <targets>] [options]
+tattletale -d <file> [-p <file>] [-t <files>] [options]
 
 REQUIRED
-    -d, --ditfiles <file>...    NTDS.DIT dump file(s) from secretsdump
+    -d, --dit <file>            secretsdump output file
 
 OPTIONS
-    -p, --potfiles <file>...    Hashcat potfile(s) with cracked hashes
-    -t, --targetfiles <file>... Target lists (domain admins, service accounts)
-    -o, --output <dir>          Export reports to directory
-    --redact-full               Hide passwords completely (********)
-    --redact-partial            Show first two chars only (Pa******)
-    -q, --quiet                 Suppress banner and status messages
-    -h, --help                  Show help message
+    -p, --pot <file>            hashcat potfile with cracked hashes
+    -t, --targets <files>       target lists (admins.txt, svc.txt, etc)
+    -o, --output <dir>          export reports to directory
+    -r, --redact-partial        show first 2 chars only (Pa**********)
+    -R, --redact-full           hide passwords completely (************)
+    -h, --help                  show help message
+    -V, --version               show version
+
+POLICY
+    --policy-length <n>         minimum password length
+    --policy-complexity <n>     require n-of-4 character classes (upper, lower, digit, symbol)
+    --policy-no-username        password cannot contain username
 ```
 
 ## Examples
 
 ```bash
-# Basic analysis
-python3 tattletale.py -d ntds.dit
+# Basic analysis - just the dump file
+tattletale -d ntds.dit
 
-# With cracked hashes
-python3 tattletale.py -d ntds.dit -p hashcat.potfile
+# With cracked hashes from hashcat
+tattletale -d ntds.dit -p hashcat.pot
 
-# Full analysis with targets and export
-python3 tattletale.py -d ntds.dit -p cracked.pot -t domain_admins.txt -o ./report
+# Track high-value targets with multiple lists
+tattletale -d ntds.dit -p hashcat.pot -t domain_admins.txt svc_accounts.txt
 
 # Redacted output for client reports
-python3 tattletale.py -d ntds.dit -p cracked.pot --redact-partial -o ./report
+tattletale -d ntds.dit -p hashcat.pot -r -o ./report
 
-# Run with example data
-python3 tattletale.py -d examples/sample.dit -p examples/sample.pot -t examples/targets.txt
+# Check cracked passwords against policy (8 chars, 3-of-4 complexity)
+tattletale -d ntds.dit -p hashcat.pot --policy-length 8 --policy-complexity 3
 ```
 
-## Input Formats
+## Output
 
-| File Type | Format | Example |
-|-----------|--------|---------|
+### Statistics
+
+Overview of the dump: total accounts, cracking progress, hash types, and security warnings like empty passwords or legacy LM hashes.
+
+![Statistics](assets/tt_stats.png)
+
+### High Value Targets
+
+Shows the status of accounts from your target lists. Grouped by file so you can track domain admins separately from service accounts.
+
+![High Value Targets](assets/tt_targets.png)
+
+### Shared Credentials
+
+Accounts that share the same password hash. Grouped by password with target accounts highlighted.
+
+![Shared Credentials](assets/tt_shared_creds.png)
+
+### Password Analysis
+
+Pattern analysis across all cracked passwords: length distribution, character composition, common patterns (seasons, years, keyboard walks), and most reused passwords.
+
+![Password Analysis](assets/tt_analysis.png)
+
+## Input formats
+
+| File | Format | Example |
+|------|--------|---------|
 | DIT dump | secretsdump output | `DOMAIN\user:1001:LM_HASH:NT_HASH:::` |
 | Potfile | hashcat potfile | `NT_HASH:cleartext` |
 | Targets | one username per line | `administrator` |
 
-## Output
+## See also
 
-The tool produces:
+Standing on the shoulders of giants:
 
-- **Statistics**: Account counts, cracking progress, hash types
-- **High Value Targets**: Status of priority accounts (if target file provided)
-- **Shared Credentials**: Accounts sharing the same password hash
-- **Password Analysis**: Common patterns, base words, length distribution
-- **Export Files**: `cracked_credentials.txt` and `shared_hashes.txt`
-
-## Testing
-
-```bash
-# Run unit tests
-python3 tests/test_tattletale.py
-
-# Or via Makefile (Apple Containers)
-make test
-```
+- [secretsdump.py](https://github.com/fortra/impacket) - extract hashes from NTDS.DIT
+- [hashcat](https://hashcat.net/hashcat/) - crack the hashes
+- [CrackMapExec](https://github.com/byt3bl33d3r/CrackMapExec) - password spraying and more
 
 ## License
 

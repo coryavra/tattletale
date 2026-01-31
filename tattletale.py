@@ -5,9 +5,15 @@ Analyzes secretsdump output, correlates with hashcat potfiles, identifies shared
 """
 
 import argparse
+import contextlib
+import csv
+import io
+import re
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from statistics import median
 
 
 # =============================================================================
@@ -15,20 +21,68 @@ from pathlib import Path
 # =============================================================================
 
 VERSION = "3.0.0"
-WIDTH = 85  # Total output width
+MAX_DISPLAY = 10  # Maximum items to show in lists before truncating
+HIST_HEIGHT = 8  # Rows for histogram display
+BAR_MAX_WIDTH = 12  # Maximum width for bar charts
+
+# Compiled regex for stripping ANSI codes
+ANSI_ESCAPE = re.compile(r'\033\[[0-9;]*m')
 LABEL_WIDTH = 40  # Left column for labels/names
+
+
+def get_terminal_width() -> int:
+    """Get terminal width, defaulting to 80 if unavailable."""
+    try:
+        return shutil.get_terminal_size(fallback=(80, 24)).columns
+    except Exception:
+        return 80
+
+
+# Dynamic width based on terminal size
+WIDTH = get_terminal_width()
 VALUE_WIDTH = WIDTH - LABEL_WIDTH - 4  # Right column for values (minus padding)
 
 # Well-known null hashes
 NULL_LM = "aad3b435b51404eeaad3b435b51404ee"
 NULL_NT = "31d6cfe0d16ae931b73c59d7e0c089c0"
 
-BANNER = r"""
- _____      _   _   _     _____     _
-|_   _|_ _ | |_| |_| | __|_   _|_ _| | ___
-  | |/ _` || __| __| |/ _ \| |/ _` || |/ _ \
-  | | (_| || |_| |_| |  __/| | (_| || |  __/
-  |_|\__,_| \__|\__|_|\___||_|\__,_||_|\___|
+LOGO = r"""
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠰⠉⠉⢹⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡆⢸⢹⢸⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⢸⣈⢸⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⡐⠒⠶⢶⣦⣤⣇⠀⠉⢸⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣶⣶⣤⣤⣀⣈⠉⠙⠒⠲⠭⢭⣟⣓⡾⠿⣿⣿⣷⣶⣦⣤⣤⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⡆⣤⣭⣙⣛⠿⠿⣶⣶⣬⣥⣒⣪⡭⢿⣓⣿⣿⣿⠿⠟⠛⠛⠻⠿⠷⠶⠤⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣧⢻⣿⣿⣿⣿⣷⣶⣤⣍⣙⡛⠿⠿⣿⣿⣿⣧⣤⣀⡈⣥⢴⣶⢶⣾⡿⠿⢿⣶⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣶⣬⣍⣙⠛⣿⣧⣿⣼⢏⣾⣿⢹⣿⢳⣦⡙⣿⣆⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣧⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⢹⣿⡉⣡⣾⢸⣿⡌⣿⠘⣿⣧⢹⣿⡄⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢿⣿⣿⣿⣿⣿⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡜⣿⡇⣿⣿⡆⣿⡇⣿⡆⣿⡟⣸⣿⡇⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠿⠛⢩⡀⠀⠀⠀⠈⠙⠻⣿⣿⣿⣿⣿⣿⣿⣧⢿⣷⢸⣿⣇⢹⣿⢸⣧⡿⣡⣿⡿⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠀⠂⠁⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠈⠛⠿⣿⣿⣿⣿⣿⡼⣿⡾⠿⠿⠸⣿⠿⣫⣴⣿⠟⠁⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠀⠠⠄⢐⣂⠤⠉⠉⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠐⠚⠀⠀⠈⢙⡿⣿⣿⣷⣿⣇⣿⢻⣦⡻⣿⡿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡟⠲⢦⣄⣉⠉⠐⠂⠩⠤⠀⣀⠀⠈⠀⠀⠀⠀⣀⠆⠀⠀⠀⠀⠀⠀⢀⠀⠈⠁⠀⢙⣿⣿⣿⣿⠾⠟⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⢀⣼⣒⣂⠈⠉⠁⠒⠂⠤⠄⣀⡈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠀⠀⠀⢑⣋⢭⣿⣿⡟⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠓⡏⢹⣿⣿⣿⣯⣤⣄⡠⢲⠀⠀⠀⠉⠉⠐⠒⠀⠤⢤⣄⣀⠀⠀⣁⣤⣤⣒⣭⠷⣞⣿⣿⢿⡳⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⢸⣷⣾⣭⣝⣛⣻⢃⣉⡍⢶⣶⣤⣤⣄⣉⡑⠒⠺⡇⠉⠹⣿⢻⣿⢹⣭⣶⣿⣿⡿⢿⢸⣿⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡇⢸⣿⣛⣛⠿⠿⣿⠸⣿⣿⣸⣭⣙⣛⠿⠿⣿⣿⣷⣷⡀⠀⣿⠾⢡⣿⡿⣟⣫⣵⣾⣿⢸⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣾⠧⣼⣿⣿⣿⣿⣿⠎⠈⠙⠻⢿⠿⢿⣿⣿⣿⣶⣾⣿⣿⠀⢠⡤⣞⢹⣿⣿⣿⡿⠟⣋⣽⢸⣿⣇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢿⠀⠊⢿⣆⣉⠙⠻⡀⡰⠀⢠⣾⣿⣷⣶⣮⣭⣟⣛⣿⣿⠀⠈⡇⣿⢸⣟⣫⣵⣾⣿⣿⡿⢪⢾⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠓⠺⠟⠢⠬⣀⡈⠒⠊⠉⠛⠛⠿⠿⣿⣿⣿⣿⣿⣿⠀⠀⣷⣿⣸⣿⣿⣿⢿⣫⣽⢡⣿⣼⠟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠐⠒⠤⢄⣀⡀⠀⠄⣉⣙⠛⣻⡶⠞⣿⣮⣝⠻⣿⣾⣿⠿⠃⠘⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠙⠓⠶⢬⡽⠁⠀⠀⢹⡼⣿⣷⠈⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠙⠓⠲⠶⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+"""
+
+TITLE = r"""
+ /$$$$$$$$          /$$     /$$     /$$        /$$$$$$$$        /$$
+|__  $$__/         | $$    | $$    | $$       |__  $$__/       | $$
+   | $$  /$$$$$$  /$$$$$$ /$$$$$$  | $$  /$$$$$$ | $$  /$$$$$$ | $$  /$$$$$$
+   | $$ |____  $$|_  $$_/|_  $$_/  | $$ /$$__  $$| $$ |____  $$| $$ /$$__  $$
+   | $$  /$$$$$$$  | $$    | $$    | $$| $$$$$$$$| $$  /$$$$$$$| $$| $$$$$$$$
+   | $$ /$$__  $$  | $$ /$$| $$ /$$| $$| $$_____/| $$ /$$__  $$| $$| $$_____/
+   | $$|  $$$$$$$  |  $$$$/|  $$$$/| $$|  $$$$$$$| $$|  $$$$$$$| $$|  $$$$$$$
+   |__/ \_______/   \___/   \___/  |__/ \_______/|__/ \_______/|__/ \_______/
 """
 
 
@@ -99,30 +153,34 @@ class Credential:
 def parse_dit_file(filepath: Path) -> list[Credential]:
     """Parse secretsdump format: DOMAIN\\user:id:LM_hash:NT_hash:::"""
     credentials = []
-    with open(filepath) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split(":")
-            if len(parts) < 4:
-                continue
+    try:
+        with open(filepath, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split(":")
+                if len(parts) < 4:
+                    continue
 
-            username = parts[0]
-            lm_hash = parts[2].lower() if len(parts) > 2 else ""
-            nt_hash = parts[3].lower() if len(parts) > 3 else ""
+                username = parts[0]
+                lm_hash = parts[2].lower() if len(parts) > 2 else ""
+                nt_hash = parts[3].lower() if len(parts) > 3 else ""
 
-            cred = Credential(down_level_logon_name=username, lm_hash=lm_hash, nt_hash=nt_hash)
+                cred = Credential(down_level_logon_name=username, lm_hash=lm_hash, nt_hash=nt_hash)
 
-            if "\\" in username:
-                cred.domain, cred.sam_account_name = username.split("\\", 1)
-            else:
-                cred.sam_account_name = username
+                if "\\" in username:
+                    cred.domain, cred.sam_account_name = username.split("\\", 1)
+                else:
+                    cred.sam_account_name = username
 
-            cred.is_machine = username.rstrip().endswith("$")
-            # Empty password = NT hash is the null hash (LM is often null even with passwords)
-            cred.is_null = (nt_hash == NULL_NT)
-            credentials.append(cred)
+                cred.is_machine = username.endswith("$")
+                # Empty password = NT hash is the null hash (LM is often null even with passwords)
+                cred.is_null = (nt_hash == NULL_NT)
+                credentials.append(cred)
+    except OSError as e:
+        error(f"Failed to read DIT file: {e}")
+        sys.exit(1)
 
     return credentials
 
@@ -130,24 +188,32 @@ def parse_dit_file(filepath: Path) -> list[Credential]:
 def parse_pot_file(filepath: Path) -> dict[str, str]:
     """Parse hashcat potfile format: hash:cleartext"""
     hashes = {}
-    with open(filepath) as f:
-        for line in f:
-            line = line.strip()
-            if not line or ":" not in line:
-                continue
-            hash_val, cleartext = line.split(":", 1)
-            hashes[hash_val.lower()] = cleartext
+    try:
+        with open(filepath, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or ":" not in line:
+                    continue
+                hash_val, cleartext = line.split(":", 1)
+                hashes[hash_val.lower()] = cleartext
+    except OSError as e:
+        error(f"Failed to read potfile: {e}")
+        sys.exit(1)
     return hashes
 
 
-def parse_target_file(filepath: Path) -> list[str]:
-    """Parse target file - one username per line"""
-    targets = []
-    with open(filepath) as f:
-        for line in f:
-            username = line.strip()
-            if username:
-                targets.append(username.lower())
+def parse_target_file(filepath: Path) -> set[str]:
+    """Parse target file - one username per line. Returns lowercase set."""
+    targets = set()
+    try:
+        with open(filepath, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                username = line.strip()
+                if username:
+                    targets.add(username.lower())
+    except OSError as e:
+        error(f"Failed to read target file: {e}")
+        sys.exit(1)
     return targets
 
 
@@ -157,13 +223,8 @@ def parse_target_file(filepath: Path) -> list[str]:
 
 def banner():
     """Print the banner"""
-    print(f"{C.M}{BANNER}{C.X}")
-    print(f"{C.DM}{'NTDS Dump Analyzer':^{WIDTH}}{C.X}")
-    credit = f"made with {C.R}♥{C.DM} by @coryavra"
-    # Account for color codes in centering
-    visible_len = len("made with ♥ by @coryavra")
-    padding = (WIDTH - visible_len) // 2
-    print(f"{C.DM}{' ' * padding}made with {C.R}♥{C.X}{C.DM} by {C.C}@coryavra{C.X}")
+    print(f"{C.M}{LOGO}{C.X}")
+    print(f"{C.C}{TITLE}{C.X}")
 
 
 def divider(char: str = "─"):
@@ -171,59 +232,25 @@ def divider(char: str = "─"):
     print(f"{C.DM}{char * WIDTH}{C.X}")
 
 
-def header(title: str, tree: bool = False):
-    """Print a section header"""
+def header(title: str, stat: str = "", tree: bool = False):
+    """Print a section header with optional right-aligned stat"""
     print()
-    print(f"{C.BD}{C.C}{title}{C.X}")
+    if stat:
+        visible_title = ANSI_ESCAPE.sub('', title)
+        visible_stat = ANSI_ESCAPE.sub('', stat)
+        padding = WIDTH - len(visible_title) - len(visible_stat)
+        print(f"{C.BD}{C.C}{title}{C.X}{' ' * padding}{stat}")
+    else:
+        print(f"{C.BD}{C.C}{title}{C.X}")
     if tree:
         print(f"{C.DM}──┬{'─' * (WIDTH - 3)}{C.X}")
     else:
         divider()
 
 
-def subheader(title: str, value: str = ""):
-    """Print a subsection header with right-aligned value"""
-    import re
-    visible_title = re.sub(r'\033\[[0-9;]*m', '', title)
-    if value:
-        # 4 = "  [" + "]"
-        padding = WIDTH - len(visible_title) - len(value) - 4
-        print(f"\n{C.Y}  [{title}]{C.X}{' ' * padding}{C.DM}{value}{C.X}")
-    else:
-        print(f"\n{C.Y}  [{title}]{C.X}")
-
-
-def row(label: str, value: str, indent: int = 2):
-    """Print a row with left label and right-aligned value"""
-    prefix = " " * indent
-    # Calculate visible length (strip ANSI codes for padding calculation)
-    import re
-    visible_value = re.sub(r'\033\[[0-9;]*m', '', value)
-    padding = WIDTH - indent - len(label) - len(visible_value)
-    print(f"{prefix}{label}{' ' * padding}{value}")
-
-
-def item(text: str, marker: str = "", indent: int = 4):
-    """Print a list item with optional right-aligned marker"""
-    import re
-    prefix = " " * indent
-    visible_text = re.sub(r'\033\[[0-9;]*m', '', text)
-    if marker:
-        visible_marker = re.sub(r'\033\[[0-9;]*m', '', marker)
-        padding = WIDTH - indent - len(visible_text) - len(visible_marker)
-        print(f"{prefix}{text}{' ' * padding}{marker}")
-    else:
-        print(f"{prefix}{text}")
-
-
 def status(message: str):
     """Print a status message"""
     print(f"{C.DM}  {message}{C.X}")
-
-
-def success(message: str):
-    """Print a success message"""
-    print(f"{C.G}  {message}{C.X}")
 
 
 def error(message: str):
@@ -252,28 +279,14 @@ def label_color(filename: str) -> str:
     return LABEL_COLORS[sum(ord(c) for c in filename) % len(LABEL_COLORS)]
 
 
-def dotfill(left: str, right: str, total_width: int, left_color: str = "", right_color: str = "") -> str:
-    """Create a line with left content, dots, and right-aligned content"""
-    # Calculate visible lengths (without ANSI codes)
-    left_len = len(left)
-    right_len = len(right)
-    dots_len = total_width - left_len - right_len - 2  # 2 spaces around dots
-    dots = "·" * max(dots_len, 3)
-    return f"{left_color}{left}{C.X} {C.DM}{dots}{C.X} {right_color}{right}{C.X}"
-
-
 # =============================================================================
 # Main
 # =============================================================================
 
 def print_help():
     """Print styled help menu"""
-    print(f"{C.M}{BANNER}{C.X}")
-    print(f"{C.DM}{'NTDS Dump Analyzer':^{WIDTH}}{C.X}")
-    # Credit line with red heart
-    visible_len = len("made with ♥ by @coryavra")
-    padding = (WIDTH - visible_len) // 2
-    print(f"{C.DM}{' ' * padding}made with {C.R}♥{C.X}{C.DM} by {C.C}@coryavra{C.X}")
+    print(f"{C.M}{LOGO}{C.X}")
+    print(f"{C.C}{TITLE}{C.X}")
     print()
     print(f"{C.BD}USAGE{C.X}")
     print(f"    tattletale -d <file> [-p <file>] [-t <files>] [options]")
@@ -348,9 +361,6 @@ def main():
     parser.add_argument("-h", "--help", action="store_true")
 
     # Capture stderr to suppress argparse's ugly output
-    import io
-    import contextlib
-
     stderr_capture = io.StringIO()
     try:
         with contextlib.redirect_stderr(stderr_capture):
@@ -421,11 +431,10 @@ def main():
                 error(f"Target file not found: {target_path}")
                 sys.exit(1)
             status(f"Parsing {path.name}...")
-            file_targets = parse_target_file(path)
-            for t in file_targets:
-                targets.add(t)
+            file_targets = parse_target_file(path)  # Already lowercase set
+            targets.update(file_targets)
             for cred in all_credentials:
-                if cred.sam_account_name.lower() in [t.lower() for t in file_targets]:
+                if cred.sam_account_name.lower() in file_targets:
                     cred.is_target = True
                     cred.target_files.append(path.name)
             print(f"  {C.DM}└─ Found {len(file_targets)} targets{C.X}")
@@ -449,7 +458,7 @@ def main():
     # Header with crack rate
     if valid_users:
         pct = len(cracked_users) / len(valid_users)
-        header(f"Statistics — {C.G}{len(cracked_users)}{C.X}{C.BD}/{len(valid_users)} cracked ({pct*100:.0f}%)")
+        header("Statistics", f"{C.G}{len(cracked_users)}{C.X}/{len(valid_users)} cracked ({pct*100:.0f}%)")
     else:
         header("Statistics")
 
@@ -478,9 +487,8 @@ def main():
     if empty_password_users:
         print()
         print(f"  {C.R}⚠ {len(empty_password_users)} accounts have NO PASSWORD{C.X} {C.DM}(often disabled, but verify){C.X}")
-        max_display = 10
         sorted_empty = sorted(empty_password_users, key=lambda c: (not c.is_target, c.sam_account_name))
-        display_count = min(len(sorted_empty), max_display)
+        display_count = min(len(sorted_empty), MAX_DISPLAY)
         remaining = len(sorted_empty) - display_count
         for i, cred in enumerate(sorted_empty[:display_count]):
             is_last = (i == display_count - 1) and remaining == 0
@@ -496,9 +504,8 @@ def main():
     if lm_users:
         print()
         print(f"  {C.O}⚠ {len(lm_users)} accounts have LM hashes{C.X} {C.DM}(weak legacy format){C.X}")
-        max_display = 10
         sorted_lm = sorted(lm_users, key=lambda c: (not c.is_target, c.sam_account_name))
-        display_count = min(len(sorted_lm), max_display)
+        display_count = min(len(sorted_lm), MAX_DISPLAY)
         remaining = len(sorted_lm) - display_count
         for i, cred in enumerate(sorted_lm[:display_count]):
             is_last = (i == display_count - 1) and remaining == 0
@@ -555,7 +562,7 @@ def main():
 
         # Count unique cracked targets (a user in multiple files counts once)
         unique_cracked = len([c for c in target_creds if c.is_cracked])
-        header(f"High Value Targets — {C.G}{unique_cracked}{C.X}{C.BD}/{len(target_creds)} cracked")
+        header("High Value Targets", f"{C.G}{unique_cracked}{C.X}/{len(target_creds)} cracked")
 
         sorted_files = sorted(file_to_creds.items(), key=lambda x: x[0])
         for file_idx, (filename, creds) in enumerate(sorted_files):
@@ -613,7 +620,7 @@ def main():
     # ==========================================================================
     if targets and target_shared_hashes:
         total_shared_accounts = sum(len(creds) for creds in target_shared_hashes.values())
-        header(f"Shared Target Credentials — {C.O}{len(target_shared_hashes)}{C.X}{C.BD} groups, {total_shared_accounts} accounts")
+        header("Shared Target Credentials", f"{C.G}{len(target_shared_hashes)}{C.X} groups, {total_shared_accounts} accounts")
 
         # Calculate max widths from actual data
         all_shared_creds = [c for creds in target_shared_hashes.values() for c in creds]
@@ -683,10 +690,10 @@ def main():
                     # Include as many labels as fit
                     included_idx = []
                     current_len = 0
-                    for i, label in enumerate(label_list):
-                        sep_len = 2 if i > 0 else 0  # ", "
+                    for label_idx, label in enumerate(label_list):
+                        sep_len = 2 if label_idx > 0 else 0  # ", "
                         if current_len + sep_len + len(label) <= max_label_len:
-                            included_idx.append(i)
+                            included_idx.append(label_idx)
                             current_len += sep_len + len(label)
                         else:
                             break
@@ -708,7 +715,7 @@ def main():
                     colored_labels = ", ".join(f"{label_color(file_list[i])}{label_list[i]}{C.X}" for i in included_idx)
                     if remaining > 0:
                         labels += f", +{remaining}"
-                        colored_labels += f"{C.DM}, +{remaining}{C.X}"
+                        colored_labels += f"{C.DM}, {C.Y}+{remaining}{C.X}"
 
                     right_len = len(labels)
                     dots_len = WIDTH - left_len - right_len
@@ -731,18 +738,15 @@ def main():
         if other_shared:
             other_users = sum(len(creds) for creds in other_shared.values())
             print()
-            print(f"  {C.DM}+ {len(other_shared)} other groups ({other_users} users) share passwords{C.X}")
+            print(f"  {C.DM}+ {len(other_shared)} non-target groups ({other_users} users) also share passwords{C.X}")
 
     # ==========================================================================
     # Password Analysis
     # ==========================================================================
     cracked_passwords = [c.cleartext for c in all_credentials if c.is_cracked and c.cleartext]
     if cracked_passwords:
-        import re as regex
-        from statistics import median
-
         unique_passwords = list(set(cracked_passwords))
-        header(f"Password Analysis — {len(unique_passwords)} cracked unique passwords")
+        header("Password Analysis", f"{C.G}{len(unique_passwords)}{C.X} unique passwords")
 
         # ── Length Statistics ──
         lengths = [len(p) for p in cracked_passwords]
@@ -759,43 +763,48 @@ def main():
             length_counts[length] = length_counts.get(length, 0) + 1
 
         if length_counts:
-            min_hist_len = max(1, min_len)
-            max_hist_len = max_len  # Show full range
+            # Only show lengths that have data (sorted)
+            lengths_with_data = sorted(length_counts.keys())
             max_count = max(length_counts.values())
-            hist_height = 8  # Rows of histogram
 
-            # Adjust bar width based on range (narrower bars for wider ranges)
-            range_size = max_hist_len - min_hist_len + 1
-            if range_size <= 10:
-                bar_width, bar_gap = 3, 1
-            elif range_size <= 20:
-                bar_width, bar_gap = 2, 1
+            # Calculate column width to fit both bars and labels
+            max_label_width = max(len(str(l)) for l in lengths_with_data)
+            num_bars = len(lengths_with_data)
+            bar_gap = 1
+
+            if num_bars <= 10:
+                bar_width = max(3, max_label_width)
+            elif num_bars <= 20:
+                bar_width = max(2, max_label_width)
             else:
-                bar_width, bar_gap = 1, 1
+                bar_width = max(1, max_label_width)
+
+            col_width = bar_width + bar_gap
 
             # Build histogram rows (top to bottom)
             print()
-            for row in range(hist_height, 0, -1):
-                threshold = (row / hist_height) * max_count
+            for row in range(HIST_HEIGHT, 0, -1):
+                threshold = (row / HIST_HEIGHT) * max_count
                 line = "  "
-                for length in range(min_hist_len, max_hist_len + 1):
-                    count = length_counts.get(length, 0)
+                for length in lengths_with_data:
+                    count = length_counts[length]
                     if count >= threshold:
-                        line += f"{C.C}{'█' * bar_width}{C.X}{' ' * bar_gap}"
-                    elif count >= threshold - (max_count / hist_height / 2):
-                        line += f"{C.DM}{'▄' * bar_width}{C.X}{' ' * bar_gap}"
+                        line += f"{C.C}{'█' * bar_width}{C.X} "
+                    elif count >= threshold - (max_count / HIST_HEIGHT / 2):
+                        line += f"{C.DM}{'▄' * bar_width}{C.X} "
+                    elif row == 1 and count > 0:
+                        # Ensure outliers with small counts show at least a half-block
+                        line += f"{C.DM}{'▄' * bar_width}{C.X} "
                     else:
-                        line += " " * (bar_width + bar_gap)
+                        line += " " * col_width
                 print(line)
 
             # X-axis labels (centered under each bar)
             axis_line = "  "
-            for length in range(min_hist_len, max_hist_len + 1):
+            for length in lengths_with_data:
                 label = str(length)
-                padding = bar_width - len(label)
-                left_pad = padding // 2
-                right_pad = padding - left_pad + bar_gap
-                axis_line += " " * left_pad + label + " " * right_pad
+                # Center label under the bar, then add the gap
+                axis_line += label.center(bar_width) + " " * bar_gap
             print(f"{C.DM}{axis_line}{C.X}")
 
         # ── Policy Compliance ──
@@ -897,15 +906,15 @@ def main():
         print(f"  {C.DM}Patterns{C.X}")
 
         seasons = r'(spring|summer|fall|autumn|winter)'
-        months = r'(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)'
+        months = r'(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)'
         patterns = [
             ("starts with capital", len([p for p in unique_passwords if p and p[0].isupper()])),
-            ("ends with number", len([p for p in unique_passwords if regex.search(r'\d$', p)])),
-            ("ends with symbol", len([p for p in unique_passwords if regex.search(r'[!@#$%^&*()_+=\-]$', p)])),
-            ("contains year (19xx/20xx)", len([p for p in unique_passwords if regex.search(r'(19|20)\d{2}', p)])),
-            ("contains month name", len([p for p in unique_passwords if regex.search(months, p.lower())])),
-            ("contains season", len([p for p in unique_passwords if regex.search(seasons, p.lower())])),
-            ("keyboard walk", len([p for p in unique_passwords if regex.search(r'(qwert|asdf|zxcv|1234|!@#\$)', p.lower())])),
+            ("ends with number", len([p for p in unique_passwords if re.search(r'\d$', p)])),
+            ("ends with symbol", len([p for p in unique_passwords if re.search(r'[!@#$%^&*()_+=\-]$', p)])),
+            ("contains year (19xx/20xx)", len([p for p in unique_passwords if re.search(r'(19|20)\d{2}', p)])),
+            ("contains month name", len([p for p in unique_passwords if re.search(months, p.lower())])),
+            ("contains season", len([p for p in unique_passwords if re.search(seasons, p.lower())])),
+            ("keyboard walk", len([p for p in unique_passwords if re.search(r'(qwert|asdf|zxcv|1234|!@#\$)', p.lower())])),
         ]
 
         for name, count in patterns:
@@ -916,7 +925,7 @@ def main():
         # ── Year Distribution ──
         year_counts = {}
         for pwd in unique_passwords:
-            years = regex.findall(r'((?:19|20)\d{2})', pwd)
+            years = re.findall(r'((?:19|20)\d{2})', pwd)
             for year in years:
                 year_int = int(year)
                 if 1980 <= year_int <= 2030:  # Reasonable year range
@@ -926,12 +935,15 @@ def main():
             print()
             print(f"  {C.DM}Years found{C.X}")
             max_year_count = max(year_counts.values())
-            bar_max_width = 12
-            for year, count in sorted(year_counts.items(), key=lambda x: -x[1]):
+            sorted_years = sorted(year_counts.items(), key=lambda x: -x[1])[:MAX_DISPLAY]
+            for year, count in sorted_years:
                 pct = count / len(unique_passwords) * 100
-                bar_width = int(bar_max_width * count / max_year_count)
+                bar_width = max(1, int(BAR_MAX_WIDTH * count / max_year_count))
                 bar = f"{C.C}{'█' * bar_width}{C.X}"
                 print(f"    {C.C}{year:>6}{C.X}  {bar}  {pct:.0f}%")
+            remaining_years = len(year_counts) - len(sorted_years)
+            if remaining_years > 0:
+                print(f"    {C.DM}... and {remaining_years} more{C.X}")
 
         # ── Top Passwords ──
         if not args.redact_full:
@@ -951,8 +963,8 @@ def main():
         # ── Common Base Words ──
         base_words = {}
         for pwd in unique_passwords:
-            base = regex.sub(r'[\d!@#$%^&*()_+=\-]+$', '', pwd.lower())
-            base = regex.sub(r'^[\d!@#$%^&*()_+=\-]+', '', base)  # Strip leading too
+            base = re.sub(r'[\d!@#$%^&*()_+=\-]+$', '', pwd.lower())
+            base = re.sub(r'^[\d!@#$%^&*()_+=\-]+', '', base)  # Strip leading too
             if base and len(base) >= 3:
                 base_words[base] = base_words.get(base, 0) + 1
 
@@ -965,98 +977,68 @@ def main():
                 for base, count in duplicates:
                     print(f"    {C.C}{count:5.0f}{C.X}x  {base}")
 
-        # ── Honorable Mentions (funny/notable passwords) ──
-        honorable_words = [
-            "fuck", "shit", "ass", "damn", "hell", "bitch", "crap", "piss",
-            "dick", "cock", "pussy", "boob", "tits", "sex", "porn", "nude",
-            "weed", "420", "69", "beer", "vodka", "whiskey",
-            "love", "hate", "kill", "dead", "death",
-            "god", "jesus", "satan", "devil",
-            "trump", "biden", "obama",
-            "password", "letmein", "qwerty", "admin", "root",
-            "monkey", "dragon", "master", "princess", "superman", "batman",
-            "iloveyou", "trustno1", "welcome", "hello", "goodbye",
-            "secret", "hidden", "private", "security",
-            "abc123", "123456", "111111", "000000",
-            "lol", "wtf", "omg", "yolo", "swag",
-        ]
-        found_honorable = []
-        for pwd in unique_passwords:
-            pwd_lower = pwd.lower()
-            for word in honorable_words:
-                if word in pwd_lower:
-                    found_honorable.append((pwd, word))
-                    break
-
-        if found_honorable and not args.redact_full:
-            print()
-            print(f"  {C.DM}Honorable mentions{C.X}")
-            # Show up to 10, deduplicated by password
-            shown = set()
-            count = 0
-            for pwd, matched_word in found_honorable:
-                if pwd not in shown and count < 10:
-                    display_pwd = redact(pwd) if args.redact_partial else pwd
-                    print(f"    {C.M}→{C.X}  {display_pwd}")
-                    shown.add(pwd)
-                    count += 1
-
     # ==========================================================================
     # Export
     # ==========================================================================
     if args.output:
-        import csv
-
         header("Export")
         output_dir = Path(args.output)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            error(f"Failed to create output directory: {e}")
+            sys.exit(1)
 
         files_saved = []
 
-        # Cracked credentials (simple user:pass format)
-        userpass_file = output_dir / "tt-cracked.txt"
-        cracked_creds = [c for c in all_credentials if c.is_cracked]
-        with open(userpass_file, "w") as f:
-            for cred in sorted(cracked_creds):
-                f.write(f"{cred.down_level_logon_name}:{redact(cred.cleartext, color=False)}\n")
-        files_saved.append((userpass_file.name, f"{len(cracked_creds)} credentials"))
+        try:
+            # Cracked credentials (simple user:pass format)
+            userpass_file = output_dir / "tt-cracked.txt"
+            cracked_creds = [c for c in all_credentials if c.is_cracked]
+            with open(userpass_file, "w") as f:
+                for cred in sorted(cracked_creds):
+                    f.write(f"{cred.down_level_logon_name}:{redact(cred.cleartext, color=False)}\n")
+            files_saved.append((userpass_file.name, f"{len(cracked_creds)} credentials"))
 
-        # Empty password accounts (critical finding)
-        if empty_password_users:
-            empty_file = output_dir / "tt-empty-passwords.txt"
-            with open(empty_file, "w") as f:
-                for cred in sorted(empty_password_users):
-                    f.write(f"{cred.down_level_logon_name}\n")
-            files_saved.append((empty_file.name, f"{len(empty_password_users)} accounts"))
+            # Empty password accounts (critical finding)
+            if empty_password_users:
+                empty_file = output_dir / "tt-empty-passwords.txt"
+                with open(empty_file, "w") as f:
+                    for cred in sorted(empty_password_users):
+                        f.write(f"{cred.down_level_logon_name}\n")
+                files_saved.append((empty_file.name, f"{len(empty_password_users)} accounts"))
 
-        # LM hash accounts (security finding)
-        if lm_users:
-            lm_file = output_dir / "tt-lm-hashes.txt"
-            with open(lm_file, "w") as f:
-                for cred in sorted(lm_users):
-                    f.write(f"{cred.down_level_logon_name}:{cred.lm_hash}\n")
-            files_saved.append((lm_file.name, f"{len(lm_users)} accounts"))
+            # LM hash accounts (security finding)
+            if lm_users:
+                lm_file = output_dir / "tt-lm-hashes.txt"
+                with open(lm_file, "w") as f:
+                    for cred in sorted(lm_users):
+                        f.write(f"{cred.down_level_logon_name}:{cred.lm_hash}\n")
+                files_saved.append((lm_file.name, f"{len(lm_users)} accounts"))
 
-        # Full CSV export (all credentials with metadata)
-        csv_file = output_dir / "tt-all.csv"
-        with open(csv_file, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["domain", "username", "password", "target_file", "lm_hash", "empty", "shared_count"])
-            for cred in sorted(all_credentials):
-                domain = cred.down_level_logon_name.split("\\")[0] if "\\" in cred.down_level_logon_name else ""
-                pwd = redact(cred.cleartext, color=False) if cred.is_cracked else ""
-                target_file = ", ".join(target_label(f) for f in cred.target_files) if cred.is_target else ""
-                shared_count = len(hash_to_creds.get(cred.hash, [])) if cred.hash else 0
-                writer.writerow([
-                    domain,
-                    cred.sam_account_name,
-                    pwd,
-                    target_file,
-                    "yes" if cred.lm_hash and cred.lm_hash != NULL_LM else "no",
-                    "yes" if cred.nt_hash == NULL_NT else "no",
-                    shared_count if shared_count > 1 else ""
-                ])
-        files_saved.append((csv_file.name, f"{len(all_credentials)} rows"))
+            # Full CSV export (all credentials with metadata)
+            csv_file = output_dir / "tt-all.csv"
+            with open(csv_file, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["domain", "username", "password", "target_file", "lm_hash", "empty", "shared_count"])
+                for cred in sorted(all_credentials):
+                    domain = cred.down_level_logon_name.split("\\")[0] if "\\" in cred.down_level_logon_name else ""
+                    pwd = redact(cred.cleartext, color=False) if cred.is_cracked else ""
+                    target_file = ", ".join(target_label(f) for f in cred.target_files) if cred.is_target else ""
+                    shared_count = len(hash_to_creds.get(cred.hash, [])) if cred.hash else 0
+                    writer.writerow([
+                        domain,
+                        cred.sam_account_name,
+                        pwd,
+                        target_file,
+                        "yes" if cred.lm_hash and cred.lm_hash != NULL_LM else "no",
+                        "yes" if cred.nt_hash == NULL_NT else "no",
+                        shared_count if shared_count > 1 else ""
+                    ])
+            files_saved.append((csv_file.name, f"{len(all_credentials)} rows"))
+        except OSError as e:
+            error(f"Failed to write output file: {e}")
+            sys.exit(1)
 
         # Print saved files as tree
         print(f"  {C.G}Saved to {output_dir}/{C.X}")

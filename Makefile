@@ -9,7 +9,7 @@ VOLUMES := --volume "$(HOST_DIR):/mnt/shared"
 -include container.conf
 
 .DEFAULT_GOAL := help
-.PHONY: build run clean test test-unit nuke help
+.PHONY: build run clean test nuke help
 
 build:
 	container build --no-cache --tag "$(IMAGE_NAME)" .
@@ -60,9 +60,6 @@ test:
 	@echo ""
 	@python3 tattletale.py -d examples/sample.dit -p examples/sample.pot --policy-length 12 --policy-complexity 3
 
-test-unit:
-	@python3 tests/test_tattletale.py 2>&1 && echo "\033[32mAll tests passed\033[0m"
-
 nuke:
 	@echo "\033[33mResetting container builder...\033[0m"
 	@pkill -9 -f 'buildkit' 2>/dev/null || true
@@ -82,7 +79,6 @@ help:
 	@echo "  \033[36mrun\033[0m     Build and run interactively"
 	@echo "  \033[36mclean\033[0m   Remove the container image"
 	@echo "  \033[36mtest\033[0m    Run with example data"
-	@echo "  \033[36mtest-unit\033[0m Run unit tests"
 	@echo "  \033[36mnuke\033[0m    Reset the container builder"
 	@echo "  \033[36mhelp\033[0m    Show this message"
 	@echo ""
