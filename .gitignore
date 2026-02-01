@@ -1,5 +1,6 @@
 # Hidden directories (IDE, tools, OS)
 .*/
+!.github/
 .DS_Store
 
 # Python

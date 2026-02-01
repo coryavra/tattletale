@@ -20,7 +20,7 @@ from statistics import median
 # Constants
 # =============================================================================
 
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 MAX_DISPLAY = 10  # Maximum items to show in lists before truncating
 HIST_HEIGHT = 8  # Rows for histogram display
 BAR_MAX_WIDTH = 12  # Maximum width for bar charts
@@ -298,16 +298,15 @@ def print_help():
     print(f"    {C.C}-p, --pot{C.X} <file>           Hashcat potfile with cracked hashes")
     print(f"    {C.C}-t, --targets{C.X} <files>      Target lists, space-separated (e.g. -t admins.txt svc.txt)")
     print(f"    {C.C}-o, --output{C.X} <dir>         Export reports to directory")
-    print(f"    {C.C}-r, --redact-partial{C.X}       Show first two chars only (Pa**********)")
-    print(f"    {C.C}-R, --redact-full{C.X}          Hide passwords completely (************)")
+    print(f"    {C.C}-r, --redact{C.X}               Hide passwords completely (************)")
+    print(f"    {C.C}-R, --redact-partial{C.X}       Show first two chars only (Pa**********)")
     print(f"    {C.C}-h, --help{C.X}                 Show this help message")
-    print(f"    {C.C}-V, --version{C.X}              Show version number")
+    print(f"    {C.C}-v, --version{C.X}              Show version number")
     print()
     print(f"{C.BD}POLICY{C.X} {C.DM}(check cracked passwords against requirements){C.X}")
     print(f"    {C.C}--policy-length{C.X} <n>        Minimum password length")
     print(f"    {C.C}--policy-complexity{C.X} <n>    Require n-of-4 character classes (1-4)")
     print(f"                               {C.DM}(uppercase, lowercase, digit, symbol){C.X}")
-    print(f"    {C.C}--policy-no-username{C.X}       Password must not contain username")
     print()
     print(f"{C.BD}EXAMPLES{C.X}")
     print(f"    {C.DM}# Basic analysis{C.X}")
@@ -344,7 +343,7 @@ def main():
         sys.exit(0)
 
     # Check for version flag
-    if "-V" in sys.argv or "--version" in sys.argv:
+    if "-v" in sys.argv or "--version" in sys.argv:
         print(f"TattleTale v{VERSION}")
         sys.exit(0)
 
@@ -353,11 +352,10 @@ def main():
     parser.add_argument("-p", "--pot")
     parser.add_argument("-t", "--targets", nargs="+")
     parser.add_argument("-o", "--output")
-    parser.add_argument("-r", "--redact-partial", action="store_true")
-    parser.add_argument("-R", "--redact-full", action="store_true")
+    parser.add_argument("-r", "--redact", action="store_true")
+    parser.add_argument("-R", "--redact-partial", action="store_true")
     parser.add_argument("--policy-length", type=int)
     parser.add_argument("--policy-complexity", type=int, choices=[1, 2, 3, 4])
-    parser.add_argument("--policy-no-username", action="store_true")
     parser.add_argument("-h", "--help", action="store_true")
 
     # Capture stderr to suppress argparse's ugly output
@@ -375,7 +373,7 @@ def main():
             return password
         gr = C.GR if color else ""
         x = C.X if color else ""
-        if args.redact_full:
+        if args.redact:
             return f"{gr}************{x}"
         if args.redact_partial:
             prefix = password[:2] if len(password) >= 2 else password[0]
@@ -551,7 +549,7 @@ def main():
     # ==========================================================================
     # High Value Targets (grouped by target file)
     # ==========================================================================
-    if targets:
+    if target_creds:
         # Group credentials by target file
         file_to_creds: dict[str, list[Credential]] = {}
         for cred in target_creds:
@@ -595,7 +593,7 @@ def main():
                 if cred.is_cracked:
                     pwd_display = redact(cred.cleartext)
                     # Calculate visible length accounting for redaction
-                    if args.redact_full:
+                    if args.redact:
                         right_len = 12  # "************"
                     elif args.redact_partial:
                         right_len = 12  # "XX**********"
@@ -638,17 +636,17 @@ def main():
             if cleartext:
                 pwd_display = redact(cleartext)
                 # Calculate visible length accounting for redaction
-                if args.redact_full:
+                if args.redact:
                     pwd_visible_len = 12  # "************"
                 elif args.redact_partial:
                     pwd_visible_len = 12  # "XX**********"
                 else:
                     pwd_visible_len = len(cleartext)
             else:
-                hash_display = redact(hash_val, color=False) if (args.redact_full or args.redact_partial) else hash_val
+                hash_display = redact(hash_val, color=False) if (args.redact or args.redact_partial) else hash_val
                 pwd_display = f"{C.O}{hash_display} (not cracked){C.X}"
                 # Visible: hash_display + " (not cracked)"
-                if args.redact_full:
+                if args.redact:
                     pwd_visible_len = 12 + len(" (not cracked)")
                 elif args.redact_partial:
                     pwd_visible_len = 12 + len(" (not cracked)")
@@ -748,6 +746,51 @@ def main():
         unique_passwords = list(set(cracked_passwords))
         header("Password Analysis", f"{C.G}{len(unique_passwords)}{C.X} unique passwords")
 
+        # ── Username in Password ──
+        username_in_pwd_creds = [c for c in all_credentials
+                                  if c.is_cracked and c.cleartext and c.sam_account_name
+                                  and c.sam_account_name.lower() in c.cleartext.lower()]
+        if username_in_pwd_creds:
+            count = len(username_in_pwd_creds)
+            if args.redact or args.redact_partial:
+                label = "account" if count == 1 else "accounts"
+                targeted_creds = [c for c in username_in_pwd_creds if c.is_target]
+                if targeted_creds:
+                    # Collect all target files
+                    target_files_set = set()
+                    for c in targeted_creds:
+                        target_files_set.update(c.target_files)
+                    labels = ", ".join(f"{label_color(f)}({target_label(f)}){C.X}" for f in sorted(target_files_set))
+                    print(f"  {C.DM}Username in password{C.X}  {C.R}{count}{C.X} {label} — {len(targeted_creds)} in {labels}")
+                else:
+                    print(f"  {C.DM}Username in password{C.X}  {C.R}{count}{C.X} {label}")
+            else:
+                print(f"  {C.DM}Username in password{C.X}")
+                # Sort with targets first
+                sorted_creds = sorted(username_in_pwd_creds, key=lambda c: (not c.is_target, c.sam_account_name.lower()))
+                display_creds = sorted_creds[:MAX_DISPLAY]
+                remaining = max(0, len(sorted_creds) - MAX_DISPLAY)
+                for i, cred in enumerate(display_creds):
+                    is_last = (i == len(display_creds) - 1) and remaining == 0
+                    prefix = "└─" if is_last else "├─"
+                    # Build left side: username and optional target label
+                    if cred.is_target:
+                        labels = ", ".join(f"{label_color(f)}({target_label(f)}){C.X}" for f in cred.target_files)
+                        labels_visible = len(", ".join(f"({target_label(f)})" for f in cred.target_files))
+                        left_side = f"{C.R}{cred.sam_account_name}{C.X}  {labels}"
+                        left_len = 5 + len(cred.sam_account_name) + 2 + labels_visible
+                    else:
+                        left_side = f"{C.R}{cred.sam_account_name}{C.X}"
+                        left_len = 5 + len(cred.sam_account_name)
+                    # Password on right
+                    right_len = len(cred.cleartext)
+                    dots_len = WIDTH - left_len - right_len
+                    dots = " " + "·" * max(dots_len - 2, 1) + " "
+                    print(f"  {C.DM}{prefix}{C.X} {left_side}{C.DM}{dots}{C.X}{cred.cleartext}")
+                if remaining > 0:
+                    print(f"  {C.DM}└─ ... and {remaining} more{C.X}")
+            print()
+
         # ── Length Statistics ──
         lengths = [len(p) for p in cracked_passwords]
         unique_lengths = [len(p) for p in unique_passwords]
@@ -808,7 +851,7 @@ def main():
             print(f"{C.DM}{axis_line}{C.X}")
 
         # ── Policy Compliance ──
-        if args.policy_length or args.policy_complexity or args.policy_no_username:
+        if args.policy_length or args.policy_complexity:
             min_length = args.policy_length or 1  # Default to 1 if not specified
             required_classes = args.policy_complexity or 0
 
@@ -822,25 +865,22 @@ def main():
                 return classes
 
             # Build failure reasons per password
-            def get_failures(pwd, username=None):
+            def get_failures(pwd):
                 failures = []
                 if args.policy_length and len(pwd) < min_length:
                     failures.append("too_short")
                 if args.policy_complexity and count_char_classes(pwd) < required_classes:
                     failures.append("no_complexity")
-                if args.policy_no_username and username:
-                    if username.lower() in pwd.lower():
-                        failures.append("contains_username")
                 return failures
 
-            # Check unique passwords (username check needs credential context)
+            # Check unique passwords
             passing = []
             failing = []
-            fail_reasons = {"too_short": 0, "no_complexity": 0, "contains_username": 0}
+            fail_reasons = {"too_short": 0, "no_complexity": 0}
 
             for cred in all_credentials:
                 if cred.is_cracked and cred.cleartext:
-                    failures = get_failures(cred.cleartext, cred.sam_account_name)
+                    failures = get_failures(cred.cleartext)
                     if failures:
                         failing.append(cred.cleartext)
                         for reason in failures:
@@ -862,8 +902,6 @@ def main():
                     policy_parts.append(f"{min_length}+ chars")
                 if args.policy_complexity:
                     policy_parts.append(f"{required_classes}-of-4 complexity")
-                if args.policy_no_username:
-                    policy_parts.append("no username")
 
                 print()
                 print(f"  {C.DM}Policy{C.X}  {', '.join(policy_parts)}")
@@ -874,8 +912,6 @@ def main():
                     fail_parts.append(f"{fail_reasons['too_short']} too short")
                 if fail_reasons["no_complexity"] > 0:
                     fail_parts.append(f"{fail_reasons['no_complexity']} lack complexity")
-                if fail_reasons["contains_username"] > 0:
-                    fail_parts.append(f"{fail_reasons['contains_username']} contain username")
                 fail_detail = f" — {', '.join(fail_parts)}" if fail_parts else ""
                 print(f"    {C.R}{fail_pct:5.1f}%{C.X}  fail ({unique_failing}{fail_detail})")
 
@@ -946,7 +982,7 @@ def main():
                 print(f"    {C.DM}... and {remaining_years} more{C.X}")
 
         # ── Top Passwords ──
-        if not args.redact_full:
+        if not args.redact:
             password_freq = {}
             for p in cracked_passwords:
                 password_freq[p] = password_freq.get(p, 0) + 1
@@ -976,6 +1012,7 @@ def main():
                 print(f"  {C.DM}Common bases{C.X}")
                 for base, count in duplicates:
                     print(f"    {C.C}{count:5.0f}{C.X}x  {base}")
+
 
     # ==========================================================================
     # Export

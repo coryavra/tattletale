@@ -56,9 +56,16 @@ test:
 	@echo "\033[1;33m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
 	@echo "\033[1;33m║  TEST 5: Policy compliance check                                     ║\033[0m"
 	@echo "\033[1;33m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
-	@echo "\033[36m\$$ python3 tattletale.py -d examples/sample.dit -p examples/sample.pot --policy-length 12 --policy-complexity 3\033[0m"
+	@echo "\033[36m\$$ python3 tattletale.py -d examples/sample.dit -p examples/sample.pot -t examples/domain_admins.txt examples/service_accounts.txt --policy-length 12 --policy-complexity 3\033[0m"
 	@echo ""
-	@python3 tattletale.py -d examples/sample.dit -p examples/sample.pot --policy-length 12 --policy-complexity 3
+	@python3 tattletale.py -d examples/sample.dit -p examples/sample.pot -t examples/domain_admins.txt examples/service_accounts.txt --policy-length 12 --policy-complexity 3
+	@echo ""
+	@echo "\033[1;33m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
+	@echo "\033[1;33m║  TEST 6: Clean data (no username in password)                        ║\033[0m"
+	@echo "\033[1;33m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
+	@echo "\033[36m\$$ python3 tattletale.py -d examples/clean.dit -p examples/clean.pot -t examples/domain_admins.txt examples/service_accounts.txt\033[0m"
+	@echo ""
+	@python3 tattletale.py -d examples/clean.dit -p examples/clean.pot -t examples/domain_admins.txt examples/service_accounts.txt
 
 nuke:
 	@echo "\033[33mResetting container builder...\033[0m"

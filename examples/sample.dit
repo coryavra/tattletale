@@ -15,7 +15,7 @@
 # Domain Admins (Password1 = 64f12cddaa88057e06a81b54e73b949b)
 CONTOSO\Administrator:500:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
 CONTOSO\da_johnson:1001:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
-CONTOSO\da_smith:1002:aad3b435b51404eeaad3b435b51404ee:72f0eefcc213ea8f350773b831cf2c9c:::
+CONTOSO\da_smith:1002:aad3b435b51404eeaad3b435b51404ee:3a59ee70cdea3fb441f69c8799d747e6:::
 CONTOSO\da_williams:1003:aad3b435b51404eeaad3b435b51404ee:bb133c948cac92c1afb921a1a7128e54:::
 CONTOSO\admin.backup:1004:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
 
@@ -26,7 +26,7 @@ CONTOSO\ea_rodriguez:1011:aad3b435b51404eeaad3b435b51404ee:db8f100fa6ad78939a90a
 # Service Accounts - IT
 CONTOSO\svc_sql:1100:aad3b435b51404eeaad3b435b51404ee:316c5ae8a7b5dfce4a5604d17d9e976e:::
 CONTOSO\svc_sqlprod:1101:aad3b435b51404eeaad3b435b51404ee:316c5ae8a7b5dfce4a5604d17d9e976e:::
-CONTOSO\svc_backup:1102:aad3b435b51404eeaad3b435b51404ee:316c5ae8a7b5dfce4a5604d17d9e976e:::
+CONTOSO\svc_backup:1102:aad3b435b51404eeaad3b435b51404ee:e5faab22a3f9a4c30f0ca173ec3088e0:::
 CONTOSO\svc_veeam:1103:aad3b435b51404eeaad3b435b51404ee:de769e624bfe51cb4109255f0f1e0910:::
 CONTOSO\svc_sccm:1104:aad3b435b51404eeaad3b435b51404ee:de769e624bfe51cb4109255f0f1e0910:::
 CONTOSO\svc_wsus:1105:aad3b435b51404eeaad3b435b51404ee:c93bd3896cc175176ffb84731c3a448d:::
@@ -82,7 +82,7 @@ CONTOSO\kwang:2303:aad3b435b51404eeaad3b435b51404ee:f126d045ae0e4dccad82c6c42550
 CONTOSO\mallen:2304:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::
 CONTOSO\pscott:2305:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::
 CONTOSO\lgreen:2306:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::
-CONTOSO\badams:2307:aad3b435b51404eeaad3b435b51404ee:8af326aa4850225b75c592d4ce19ccf5:::
+CONTOSO\badams:2307:aad3b435b51404eeaad3b435b51404ee:d00fdf49b322852ed8a4b4426fc5c31b:::
 
 # Engineering Department
 CONTOSO\eng_lead:2400:aad3b435b51404eeaad3b435b51404ee:e96bb4708669b7515102f3d197506354:::
@@ -107,7 +107,7 @@ CONTOSO\intern_summer:2603:aad3b435b51404eeaad3b435b51404ee:259745cb123a52aa2e69
 
 # Legacy accounts with LM hashes (security finding)
 # LM hashes are real too - first half of "Password1" split
-CONTOSO\legacy_admin:3001:e52cac67419a9a224a3b108f3fa6cb6d:64f12cddaa88057e06a81b54e73b949b:::
+CONTOSO\legacy_admin:3001:e52cac67419a9a224a3b108f3fa6cb6d:11aeee9da1c6c56a3e9e37d5989ca26d:::
 CONTOSO\old_backup:3002:92937945b518814341849c1ab54cf719:316c5ae8a7b5dfce4a5604d17d9e976e:::
 CONTOSO\win2003_svc:3003:a0e150c75a17008eaad3b435b51404ee:c93bd3896cc175176ffb84731c3a448d:::
 CONTOSO\legacy_app:3004:f0d412bd764ffe81aad3b435b51404ee:43f91cc95d9c04eea33c6623410ac8eb:::

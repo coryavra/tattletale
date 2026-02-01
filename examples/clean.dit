@@ -1,0 +1,26 @@
+# Clean NTDS.DIT dump - no username-in-password cases
+# Format: DOMAIN\user:RID:LM_HASH:NT_HASH:::
+
+# Domain Admins (targets)
+CLEAN\Administrator:500:aad3b435b51404eeaad3b435b51404ee:64f12cddaa88057e06a81b54e73b949b:::
+CLEAN\da_johnson:1001:aad3b435b51404eeaad3b435b51404ee:72f0eefcc213ea8f350773b831cf2c9c:::
+CLEAN\da_smith:1002:aad3b435b51404eeaad3b435b51404ee:bb133c948cac92c1afb921a1a7128e54:::
+CLEAN\da_williams:1003:aad3b435b51404eeaad3b435b51404ee:becedb42ec3c5c7f965255338be4453c:::
+CLEAN\admin.backup:1004:aad3b435b51404eeaad3b435b51404ee:997552a506abd38745b6071bdd2cb093:::
+
+# Enterprise Admins (targets)
+CLEAN\ea_chen:1010:aad3b435b51404eeaad3b435b51404ee:db8f100fa6ad78939a90aec7d807849b:::
+CLEAN\ea_rodriguez:1011:aad3b435b51404eeaad3b435b51404ee:de769e624bfe51cb4109255f0f1e0910:::
+
+# Service Accounts (targets)
+CLEAN\svc_sql:1100:aad3b435b51404eeaad3b435b51404ee:316c5ae8a7b5dfce4a5604d17d9e976e:::
+CLEAN\svc_sqlprod:1101:aad3b435b51404eeaad3b435b51404ee:0fd51666def304a5ca7ce511b375d508:::
+CLEAN\svc_backup:1102:aad3b435b51404eeaad3b435b51404ee:c93bd3896cc175176ffb84731c3a448d:::
+CLEAN\svc_exchange:1103:aad3b435b51404eeaad3b435b51404ee:ca4d343543c50f99cececfe83bddd4c1:::
+CLEAN\svc_adfs:1104:aad3b435b51404eeaad3b435b51404ee:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6:::
+CLEAN\legacy_admin:1105:aad3b435b51404eeaad3b435b51404ee:e96bb4708669b7515102f3d197506354:::
+CLEAN\sec_analyst:1106:aad3b435b51404eeaad3b435b51404ee:6a066c4cce120bb4b7d28727c5bd5730:::
+
+# Regular users
+CLEAN\jsmith:2001:aad3b435b51404eeaad3b435b51404ee:f126d045ae0e4dccad82c6c42550af20:::
+CLEAN\bjohnson:2002:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::

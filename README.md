@@ -11,22 +11,9 @@ Analyze secretsdump output and hashcat potfiles to find shared passwords, weak c
 
 Built from years of hands-on experience in enterprise penetration testing. Used in real-world assessments of Fortune 500 companies and critical infrastructure.
 
-## What it does
-
-So you've dumped the NTDS.dit and cracked some hashes, but you're left with a wall of text. TattleTale simply surfaces what the data is hiding:
-
-- **Shared credentials** - IT manager uses the same password for both of his accounts
-- **Weak privileged accounts** - 4 domain admins cracked in under an hour
-- **Password patterns** - 60% of passwords follow `Season+Year` format
-- **Legacy security issues** - service accounts still have LM hashes enabled
-- **Empty passwords** - accounts with no password set (often disabled, but verify)
-- **Policy violations** - passwords that don't meet length/complexity requirements
-
-It also tracks high-value targets across multiple lists (domain admins, service accounts, executives) so you can see exactly which critical accounts were compromised at a glance, and if any of those accounts are sharing passwords elsewhere...
-
 ## Install
 
-### pip
+#### pip
 
 ```bash
 pip install ntds-tattletale
@@ -38,7 +25,7 @@ Then run it:
 tattletale -d dump.ntds -p cracked.pot
 ```
 
-### Standalone
+#### Standalone
 
 It's a single Python file with no dependencies. Grab it and go:
 
@@ -47,7 +34,7 @@ curl -O https://raw.githubusercontent.com/coryavra/tattletale/master/tattletale.
 python3 tattletale.py -d dump.ntds -p cracked.pot
 ```
 
-### Container
+#### Container
 
 The included `Containerfile` works with [Apple Containers](https://github.com/apple/containerization) (macOS 26+) and Docker (OCI-compliant).
 

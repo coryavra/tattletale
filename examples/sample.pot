@@ -4,6 +4,8 @@
 
 # Common weak passwords
 64f12cddaa88057e06a81b54e73b949b:Password1
+3a59ee70cdea3fb441f69c8799d747e6:da_smith2024!
+11aeee9da1c6c56a3e9e37d5989ca26d:legacy_admin123
 72f0eefcc213ea8f350773b831cf2c9c:Summer2024!
 316c5ae8a7b5dfce4a5604d17d9e976e:Welcome123
 bb133c948cac92c1afb921a1a7128e54:January2024
@@ -13,6 +15,7 @@ bb133c948cac92c1afb921a1a7128e54:January2024
 
 # Service account passwords
 db8f100fa6ad78939a90aec7d807849b:Servicep@ss1
+e5faab22a3f9a4c30f0ca173ec3088e0:svc_backup2024!
 de769e624bfe51cb4109255f0f1e0910:Backup2024!
 c93bd3896cc175176ffb84731c3a448d:W$us2024
 0fd51666def304a5ca7ce511b375d508:WebServer1!
@@ -26,7 +29,7 @@ c3951ddb4ed0f4a3ab49f2017b71a1ea:Jenkins2024
 ca4d343543c50f99cececfe83bddd4c1:Finance2024!
 e0fd207483b901ec8171f2ef87ca6167:Budget2024
 f126d045ae0e4dccad82c6c42550af20:Sales2024!
-8af326aa4850225b75c592d4ce19ccf5:1234567890
+d00fdf49b322852ed8a4b4426fc5c31b:badams2024!
 
 # Engineering passwords
 e96bb4708669b7515102f3d197506354:D3v3l0p3r!
