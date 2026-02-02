@@ -19,19 +19,12 @@ Built from years of hands-on experience in enterprise penetration testing. Used 
 pip install ntds-tattletale
 ```
 
-Then run it:
-
-```bash
-tattletale -d dump.ntds -p cracked.pot
-```
-
 #### Standalone
 
 It's a single Python file with no dependencies. Grab it and go:
 
 ```bash
 curl -O https://raw.githubusercontent.com/coryavra/tattletale/master/tattletale.py
-python3 tattletale.py -d dump.ntds -p cracked.pot
 ```
 
 #### Container
@@ -60,21 +53,21 @@ docker run --rm -v "$(pwd)/data:/mnt/shared" tattletale \
 tattletale -d <file> [-p <file>] [-t <files>] [options]
 
 REQUIRED
-    -d, --dit <file>            secretsdump output file
+    -d, --dit <file>            NTDS.DIT dump file from secretsdump
 
 OPTIONS
-    -p, --pot <file>            hashcat potfile with cracked hashes
-    -t, --targets <files>       target lists (admins.txt, svc.txt, etc)
-    -o, --output <dir>          export reports to directory
-    -r, --redact-partial        show first 2 chars only (Pa**********)
-    -R, --redact-full           hide passwords completely (************)
-    -h, --help                  show help message
-    -V, --version               show version
+    -p, --pot <file>            Hashcat potfile with cracked hashes
+    -t, --targets <files>       Target lists, space-separated (e.g. -t admins.txt svc.txt)
+    -o, --output <dir>          Export reports to directory
+    -r, --redact                Hide passwords completely (************)
+    -R, --redact-partial        Show first two chars only (Pa**********)
+    -h, --help                  Show this help message
+    -v, --version               Show version number
 
-POLICY
-    --policy-length <n>         minimum password length
-    --policy-complexity <n>     require n-of-4 character classes (upper, lower, digit, symbol)
-    --policy-no-username        password cannot contain username
+POLICY (check cracked passwords against requirements)
+    --policy-length <n>         Minimum password length
+    --policy-complexity <n>     Require n-of-4 character classes (1-4)
+                                (uppercase, lowercase, digit, symbol)
 ```
 
 ## Examples
@@ -86,11 +79,11 @@ tattletale -d ntds.dit
 # With cracked hashes from hashcat
 tattletale -d ntds.dit -p hashcat.pot
 
-# Track high-value targets with multiple lists
+# Track high-value targets (multiple lists works)
 tattletale -d ntds.dit -p hashcat.pot -t domain_admins.txt svc_accounts.txt
 
-# Redacted output for client reports
-tattletale -d ntds.dit -p hashcat.pot -r -o ./report
+# Redacted output for screenshotting
+tattletale -d ntds.dit -p hashcat.pot -r
 
 # Check cracked passwords against policy (8 chars, 3-of-4 complexity)
 tattletale -d ntds.dit -p hashcat.pot --policy-length 8 --policy-complexity 3
@@ -106,7 +99,7 @@ Overview of the dump: total accounts, cracking progress, hash types, and securit
 
 ### High Value Targets
 
-Shows the status of accounts from your target lists. Grouped by file so you can track domain admins separately from service accounts.
+Shows the status of accounts from your target lists.
 
 ![High Value Targets](assets/tt_targets.png)
 
@@ -118,7 +111,7 @@ Accounts that share the same password hash. Grouped by password with target acco
 
 ### Password Analysis
 
-Pattern analysis across all cracked passwords: length distribution, character composition, common patterns (seasons, years, keyboard walks), and most reused passwords.
+Pattern analysis across all cracked passwords: length distribution, character composition, common patterns (seasons, years, keyboard walks), and most common passwords.
 
 ![Password Analysis](assets/tt_analysis.png)
 
