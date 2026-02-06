@@ -1,7 +1,7 @@
 # TattleTale
 
-[![PyPI version](https://img.shields.io/pypi/v/ntds-tattletale)](https://pypi.org/project/ntds-tattletale/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/ntds-tattletale)](https://pypi.org/project/ntds-tattletale/)
+[![PyPI version](https://img.shields.io/pypi/v/tattletale)](https://pypi.org/project/tattletale/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/tattletale)](https://pypi.org/project/tattletale/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
@@ -16,7 +16,7 @@ Built from years of hands-on experience in enterprise penetration testing. Used 
 #### pip
 
 ```bash
-pip install ntds-tattletale
+pip install tattletale
 ```
 
 #### Standalone

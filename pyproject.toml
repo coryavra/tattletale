@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ntds-tattletale"
+name = "tattletale"
 version = "3.1.0"
 description = "Post-exploitation NTDS dump analyzer — correlates secretsdump output with hashcat potfiles to identify shared passwords and weak credentials in Active Directory"
 readme = "README.md"
