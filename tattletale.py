@@ -616,6 +616,11 @@ def main():
     # ==========================================================================
     # Shared Target Credentials
     # ==========================================================================
+    if targets and not target_shared_hashes:
+        header("Shared Target Credentials", "none")
+        print(f"  {C.DM}No target accounts share a password hash with any other account{C.X}")
+        print()
+
     if targets and target_shared_hashes:
         total_shared_accounts = sum(len(creds) for creds in target_shared_hashes.values())
         header("Shared Target Credentials", f"{C.G}{len(target_shared_hashes)}{C.X} groups, {total_shared_accounts} accounts")
