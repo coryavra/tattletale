@@ -20,7 +20,7 @@ from statistics import median
 # Constants
 # =============================================================================
 
-VERSION = "3.1.0"
+VERSION = "3.3.0"
 MAX_DISPLAY = 10  # Maximum items to show in lists before truncating
 HIST_HEIGHT = 8  # Rows for histogram display
 BAR_MAX_WIDTH = 12  # Maximum width for bar charts
