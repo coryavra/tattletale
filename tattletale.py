@@ -8,9 +8,11 @@ import argparse
 import contextlib
 import csv
 import io
+import json
 import re
 import shutil
 import sys
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
@@ -45,6 +47,25 @@ VALUE_WIDTH = WIDTH - LABEL_WIDTH - 4  # Right column for values (minus padding)
 # Well-known null hashes
 NULL_LM = "aad3b435b51404eeaad3b435b51404ee"
 NULL_NT = "31d6cfe0d16ae931b73c59d7e0c089c0"
+
+# Well-known AD built-in account RIDs (last component of SID, fixed across all domains)
+# RID 502 (krbtgt) is handled separately in the Golden Ticket section
+WELL_KNOWN_RIDS: dict[int, str] = {
+    500: "Built-in Administrator",
+    501: "Guest",
+    503: "DefaultAccount",
+    504: "WDAGUtilityAccount",
+}
+
+# High-privilege group names (lowercase) used for BloodHound matching
+HIGH_PRIV_GROUPS = {
+    "domain admins", "enterprise admins", "schema admins",
+    "administrators", "backup operators", "account operators",
+    "print operators", "server operators", "dnsadmins",
+    "remote management users", "group policy creator owners",
+    "exchange windows permissions", "organization management",
+}
+
 
 LOGO = r"""
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
@@ -124,6 +145,12 @@ class Credential:
     is_cracked: bool = False
     is_null: bool = False
     target_files: list = field(default_factory=list)
+    is_history: bool = False       # True if this is a _historyN entry
+    history_index: int = -1        # 0, 1, 2, ... for _history0, _history1, ...
+    history_base: str = ""         # SAM name of parent account (e.g. "jsmith")
+    rid: int = -1                  # Relative Identifier parsed from secretsdump line
+    priv_label: str = ""           # Set when RID matches a WELL_KNOWN_RIDS entry
+    bh_groups: list = field(default_factory=list)  # High-priv groups from BloodHound
 
     @property
     def hash(self) -> str:
@@ -169,6 +196,14 @@ def parse_dit_file(filepath: Path) -> list[Credential]:
 
                 cred = Credential(down_level_logon_name=username, lm_hash=lm_hash, nt_hash=nt_hash)
 
+                # Extract RID and auto-detect well-known built-in accounts
+                try:
+                    cred.rid = int(parts[1])
+                    if cred.rid in WELL_KNOWN_RIDS:
+                        cred.priv_label = WELL_KNOWN_RIDS[cred.rid]
+                except (ValueError, IndexError):
+                    pass
+
                 if "\\" in username:
                     cred.domain, cred.sam_account_name = username.split("\\", 1)
                 else:
@@ -177,6 +212,12 @@ def parse_dit_file(filepath: Path) -> list[Credential]:
                 cred.is_machine = username.endswith("$")
                 # Empty password = NT hash is the null hash (LM is often null even with passwords)
                 cred.is_null = (nt_hash == NULL_NT)
+                # Detect history entries: DOMAIN\user_history0, _history1, etc.
+                history_match = re.search(r'_history(\d+)$', cred.sam_account_name, re.IGNORECASE)
+                if history_match:
+                    cred.is_history = True
+                    cred.history_index = int(history_match.group(1))
+                    cred.history_base = cred.sam_account_name[:history_match.start()]
                 credentials.append(cred)
     except OSError as e:
         error(f"Failed to read DIT file: {e}")
@@ -215,6 +256,124 @@ def parse_target_file(filepath: Path) -> set[str]:
         error(f"Failed to read target file: {e}")
         sys.exit(1)
     return targets
+
+
+def parse_bloodhound_zip(filepath: Path) -> dict[str, list[str]]:
+    """Parse a BloodHound/SharpHound zip export.
+
+    Reads *_users.json and *_groups.json from the archive.
+    Users file supplies ObjectIdentifier → sAMAccountName mapping.
+    Groups file supplies group name → [member ObjectIdentifiers].
+    Only high-privilege groups (HIGH_PRIV_GROUPS) are retained.
+
+    Returns {sam_account_name_lower: [group_display_name, ...]}
+    """
+    try:
+        zf = zipfile.ZipFile(filepath)
+    except (zipfile.BadZipFile, OSError) as e:
+        error(f"Failed to open BloodHound zip: {e}")
+        sys.exit(1)
+
+    names = zf.namelist()
+
+    def find_file(keyword: str) -> str | None:
+        """Find a file in the zip whose name contains keyword (case-insensitive)."""
+        for n in names:
+            base = n.split("/")[-1].lower()
+            if keyword in base and base.endswith(".json"):
+                return n
+        return None
+
+    users_file = find_file("users")
+    groups_file = find_file("groups")
+
+    if not groups_file:
+        error("BloodHound zip does not contain a groups JSON file")
+        sys.exit(1)
+
+    # ── Build SID → sAMAccountName map from users file ──
+    sid_to_sam: dict[str, str] = {}
+    if users_file:
+        try:
+            users_data = json.loads(zf.read(users_file).decode("utf-8", errors="replace"))
+        except (json.JSONDecodeError, KeyError):
+            users_data = {}
+
+        entries = users_data.get("data", users_data) if isinstance(users_data, dict) else users_data
+        if isinstance(entries, list):
+            for entry in entries:
+                props = entry.get("Properties", {})
+                oid = entry.get("ObjectIdentifier", "")
+                sam = props.get("samaccountname", "") or props.get("sAMAccountName", "")
+                # Fallback: derive from name "USER@DOMAIN"
+                if not sam:
+                    name = props.get("name", "")
+                    if "@" in name:
+                        sam = name.split("@")[0]
+                if oid and sam:
+                    sid_to_sam[oid.upper()] = sam.lower()
+
+    # ── Parse groups and build sam → [group_names] ──
+    try:
+        groups_data = json.loads(zf.read(groups_file).decode("utf-8", errors="replace"))
+    except json.JSONDecodeError as e:
+        error(f"Failed to parse BloodHound groups file: {e}")
+        sys.exit(1)
+
+    result: dict[str, list[str]] = {}
+
+    entries = groups_data.get("data", groups_data) if isinstance(groups_data, dict) else groups_data
+    if not isinstance(entries, list):
+        return result
+
+    for group in entries:
+        props = group.get("Properties", {})
+        raw_name = props.get("name", "")
+        # Group name may be "DOMAIN ADMINS@CORP.LOCAL" — take the part before @
+        group_name = raw_name.split("@")[0].strip().lower() if "@" in raw_name else raw_name.lower()
+
+        if group_name not in HIGH_PRIV_GROUPS:
+            continue
+
+        display_name = group_name.title()
+        members = group.get("Members", [])
+
+        for member in members:
+            if member.get("ObjectType", "").lower() != "user":
+                continue
+            member_sid = member.get("ObjectIdentifier", "").upper()
+            sam = sid_to_sam.get(member_sid, "")
+            if not sam:
+                # Last-resort: SID suffix heuristic won't help here, skip
+                continue
+            result.setdefault(sam, [])
+            if display_name not in result[sam]:
+                result[sam].append(display_name)
+
+    zf.close()
+    return result
+
+
+# =============================================================================
+# Analysis Helpers
+# =============================================================================
+
+def detect_incremental(passwords: list[str]) -> bool:
+    """Return True if the password list looks like an incrementing rotation."""
+    if len(passwords) < 2:
+        return False
+    bases = set()
+    for pwd in passwords:
+        base = re.sub(r'[\d!@#$%^&*()_+=\-]+$', '', pwd)
+        base = re.sub(r'^[\d!@#$%^&*()_+=\-]+', '', base).lower()
+        if base:
+            bases.add(base)
+    if len(bases) == 1 and bases:
+        return True
+    # Two or more passwords both contain a year → likely year-based rotation
+    if sum(1 for p in passwords if re.search(r'(19|20)\d{2}', p)) >= 2:
+        return True
+    return False
 
 
 # =============================================================================
@@ -289,7 +448,7 @@ def print_help():
     print(f"{C.C}{TITLE}{C.X}")
     print()
     print(f"{C.BD}USAGE{C.X}")
-    print(f"    tattletale -d <file> [-p <file>] [-t <files>] [options]")
+    print(f"    tattletale -d <file> [-p <file>] [-t <files>] [-b <zip>] [options]")
     print()
     print(f"{C.BD}REQUIRED{C.X}")
     print(f"    {C.C}-d, --dit{C.X} <file>           NTDS.DIT dump file from secretsdump")
@@ -297,6 +456,7 @@ def print_help():
     print(f"{C.BD}OPTIONS{C.X}")
     print(f"    {C.C}-p, --pot{C.X} <file>           Hashcat potfile with cracked hashes")
     print(f"    {C.C}-t, --targets{C.X} <files>      Target lists, space-separated (e.g. -t admins.txt svc.txt)")
+    print(f"    {C.C}-b, --bloodhound{C.X} <zip>     BloodHound/SharpHound zip export for group membership context")
     print(f"    {C.C}-o, --output{C.X} <dir>         Export reports to directory")
     print(f"    {C.C}-r, --redact{C.X}               Hide passwords completely (************)")
     print(f"    {C.C}-R, --redact-partial{C.X}       Show first two chars only (Pa**********)")
@@ -317,6 +477,12 @@ def print_help():
     print()
     print(f"    {C.DM}# Full analysis with multiple target lists{C.X}")
     print(f"    tattletale -d ntds.dit -p cracked.pot -t domain_admins.txt local_admins.txt")
+    print()
+    print(f"    {C.DM}# With BloodHound group membership enrichment{C.X}")
+    print(f"    tattletale -d ntds.dit -p cracked.pot -b BloodHound_2024.zip")
+    print()
+    print(f"    {C.DM}# Full analysis — cracked hashes, targets, and BloodHound context{C.X}")
+    print(f"    tattletale -d ntds.dit -p cracked.pot -t da.txt svc.txt -b BloodHound.zip")
     print()
     print(f"    {C.DM}# Redacted output for sharing{C.X}")
     print(f"    tattletale -d ntds.dit -p cracked.pot -r")
@@ -351,6 +517,7 @@ def main():
     parser.add_argument("-d", "--dit", required=True)
     parser.add_argument("-p", "--pot")
     parser.add_argument("-t", "--targets", nargs="+")
+    parser.add_argument("-b", "--bloodhound")
     parser.add_argument("-o", "--output")
     parser.add_argument("-r", "--redact", action="store_true")
     parser.add_argument("-R", "--redact-partial", action="store_true")
@@ -383,6 +550,32 @@ def main():
     # Banner
     banner()
     print()
+
+    # If --output is set, tee all terminal output to tt-output.txt as well
+    _tee_file = None
+    if args.output:
+        try:
+            _out_dir = Path(args.output)
+            _out_dir.mkdir(parents=True, exist_ok=True)
+            _tee_file = open(_out_dir / "tt-output.txt", "w", encoding="utf-8")
+
+            class _Tee:
+                def __init__(self, real, tee):
+                    self._real = real
+                    self._tee = tee
+                def write(self, data):
+                    self._real.write(data)
+                    # Strip ANSI codes before writing to file
+                    self._tee.write(ANSI_ESCAPE.sub('', data))
+                def flush(self):
+                    self._real.flush()
+                    self._tee.flush()
+                def fileno(self):
+                    return self._real.fileno()
+
+            sys.stdout = _Tee(sys.stdout, _tee_file)
+        except OSError:
+            pass  # Non-fatal; output continues normally to terminal
 
     # Parse files
     all_credentials: list[Credential] = []
@@ -439,14 +632,33 @@ def main():
     else:
         print(f"  {C.Y}⚠ No target file provided{C.X} {C.DM}(use -t/--targets to track high-value accounts){C.X}")
 
+    # Parse BloodHound zip
+    bh_groups: dict[str, list[str]] = {}
+    if args.bloodhound:
+        bh_path = Path(args.bloodhound)
+        if not bh_path.exists():
+            error(f"BloodHound zip not found: {args.bloodhound}")
+            sys.exit(1)
+        status(f"Parsing {bh_path.name}...")
+        bh_groups = parse_bloodhound_zip(bh_path)
+        print(f"  {C.DM}└─ Found {len(bh_groups)} users with high-priv group memberships{C.X}")
+
     # Remove duplicates
     all_credentials = list(dict.fromkeys(all_credentials))
+
+    # Apply BloodHound group memberships
+    if bh_groups:
+        for cred in all_credentials:
+            if not cred.is_history and not cred.is_machine:
+                groups = bh_groups.get(cred.sam_account_name.lower(), [])
+                if groups:
+                    cred.bh_groups = groups
 
     # ==========================================================================
     # Statistics
     # ==========================================================================
-    users = [c for c in all_credentials if not c.is_machine]
-    machines = [c for c in all_credentials if c.is_machine]
+    users = [c for c in all_credentials if not c.is_machine and not c.is_history]
+    machines = [c for c in all_credentials if c.is_machine and not c.is_history]
     null_users = [c for c in users if c.is_null]
     valid_users = [c for c in users if not c.is_null]
     cracked_users = [c for c in valid_users if c.is_cracked]
@@ -493,11 +705,12 @@ def main():
             prefix = "└─" if is_last else "├─"
             if cred.is_target:
                 labels = ", ".join(f"{label_color(f)}{target_label(f)}{C.X}" for f in cred.target_files)
-                print(f"  {C.DM}{prefix}{C.X} {C.R}{cred.sam_account_name}{C.X}  {labels}")
+                print(f"  {C.DM}{prefix}{C.X} {C.W}{cred.sam_account_name}{C.X}  {labels}")
             else:
                 print(f"  {C.DM}{prefix} {cred.sam_account_name}{C.X}")
         if remaining > 0:
-            print(f"  {C.DM}└─ ... and {remaining} more{C.X}")
+            hint = f"  {C.DM}(full list in tt-empty-passwords.txt){C.X}" if args.output else ""
+            print(f"  {C.DM}└─ ... and {remaining} more{C.X}{hint}")
 
     if lm_users:
         print()
@@ -510,11 +723,39 @@ def main():
             prefix = "└─" if is_last else "├─"
             if cred.is_target:
                 labels = ", ".join(f"{label_color(f)}{target_label(f)}{C.X}" for f in cred.target_files)
-                print(f"  {C.DM}{prefix}{C.X} {C.R}{cred.sam_account_name}{C.X}  {labels}")
+                print(f"  {C.DM}{prefix}{C.X} {C.W}{cred.sam_account_name}{C.X}  {labels}")
             else:
                 print(f"  {C.DM}{prefix} {cred.sam_account_name}{C.X}")
         if remaining > 0:
-            print(f"  {C.DM}└─ ... and {remaining} more{C.X}")
+            hint = f"  {C.DM}(full list in tt-lm-hashes.txt){C.X}" if args.output else ""
+            print(f"  {C.DM}└─ ... and {remaining} more{C.X}{hint}")
+
+    # ==========================================================================
+    # krbtgt Detection — Golden Ticket Risk
+    # ==========================================================================
+    krbtgt_creds = [c for c in all_credentials
+                    if c.sam_account_name.lower() == "krbtgt" and not c.is_history]
+    if krbtgt_creds:
+        any_cracked = any(c.is_cracked for c in krbtgt_creds)
+        stat_str = f"{C.R}CRITICAL{C.X}" if any_cracked else f"{C.Y}not cracked{C.X}"
+        header("krbtgt — Kerberos Trust Account", stat_str)
+        sorted_krbtgt = sorted(krbtgt_creds, key=lambda c: c.down_level_logon_name)
+        for i, cred in enumerate(sorted_krbtgt):
+            is_last = (i == len(sorted_krbtgt) - 1)
+            prefix = "└─" if is_last else "├─"
+            left_len = 5 + len(cred.down_level_logon_name)
+            if cred.is_cracked:
+                pwd_display = redact(cred.cleartext)
+                right_len = 12 if (args.redact or args.redact_partial) else len(cred.cleartext)
+                dots = " " + "·" * max(WIDTH - left_len - right_len - 2, 1) + " "
+                print(f"  {C.DM}{prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{pwd_display}")
+            else:
+                tag = "(not cracked)"
+                dots = " " + "·" * max(WIDTH - left_len - len(tag) - 2, 1) + " "
+                print(f"  {C.DM}{prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.O}{tag}{C.X}")
+        if any_cracked:
+            print()
+            print(f"  {C.R}⚠ Cracked krbtgt enables forged Kerberos tickets (Golden Ticket){C.X}")
 
     # ==========================================================================
     # High Value Targets
@@ -523,33 +764,57 @@ def main():
     # ==========================================================================
     hash_to_creds: dict[str, list[Credential]] = {}
     for cred in all_credentials:
-        if cred.hash and not cred.is_null:
+        if cred.hash and not cred.is_null and not cred.is_history:
             if cred.hash not in hash_to_creds:
                 hash_to_creds[cred.hash] = []
             hash_to_creds[cred.hash].append(cred)
 
     shared_hashes = {h: creds for h, creds in hash_to_creds.items() if len(creds) > 1}
 
-    # Filter to only shared hashes involving targets
-    target_shared_hashes = {h: creds for h, creds in shared_hashes.items()
-                           if any(c.is_target for c in creds)}
+    def is_notable(cred: Credential) -> bool:
+        """True if account is a manual target or identified as privileged via BloodHound."""
+        return cred.is_target or bool(cred.bh_groups)
 
-    # Calculate column widths across ALL target-related accounts for consistent alignment
+    def cred_right_label(cred: Credential) -> str:
+        """Plain-text label shown on the right side of a credential row."""
+        if cred.is_target:
+            return ", ".join(target_label(f) for f in cred.target_files)
+        if cred.bh_groups:
+            return ", ".join(cred.bh_groups)
+        return ""
+
+    def cred_right_label_colored(cred: Credential) -> str:
+        """ANSI-colored label shown on the right side of a credential row."""
+        if cred.is_target:
+            return ", ".join(f"{label_color(f)}{target_label(f)}{C.X}" for f in cred.target_files)
+        if cred.bh_groups:
+            return f"{C.O}{', '.join(cred.bh_groups)}{C.X}"
+        return ""
+
+    # Filter to only shared hashes involving notable accounts (targets or BH-privileged)
+    target_shared_hashes = {h: creds for h, creds in shared_hashes.items()
+                           if any(is_notable(c) for c in creds)}
+
+    # Manual target accounts
     target_creds = sorted([c for c in all_credentials if c.is_target])
+    # BloodHound-privileged accounts not already in a target file
+    bh_priv_creds = sorted([c for c in all_credentials
+                             if c.bh_groups and not c.is_target
+                             and not c.is_history and not c.is_machine])
+
+    all_notable_creds = list({id(c): c for c in target_creds + bh_priv_creds}.values())
     all_shared_creds = [c for creds in target_shared_hashes.values() for c in creds] if target_shared_hashes else []
-    all_display_creds = list(set(target_creds + all_shared_creds))
+    all_display_creds = list({id(c): c for c in all_notable_creds + all_shared_creds}.values())
 
     if all_display_creds:
         max_name = max(len(c.down_level_logon_name) for c in all_display_creds)
-        max_label = max((len(", ".join(target_label(f) for f in c.target_files)) for c in all_display_creds if c.is_target), default=0)
     else:
         max_name = 0
-        max_label = 0
 
     # ==========================================================================
-    # High Value Targets (grouped by target file)
+    # High Value Targets (grouped by target file, then BloodHound groups)
     # ==========================================================================
-    if target_creds:
+    if target_creds or bh_priv_creds:
         # Group credentials by target file
         file_to_creds: dict[str, list[Credential]] = {}
         for cred in target_creds:
@@ -558,9 +823,15 @@ def main():
                     file_to_creds[f] = []
                 file_to_creds[f].append(cred)
 
-        # Count unique cracked targets (a user in multiple files counts once)
-        unique_cracked = len([c for c in target_creds if c.is_cracked])
-        header("High Value Targets", f"{C.G}{unique_cracked}{C.X}/{len(target_creds)} cracked")
+        # Group BH-only accounts by group name
+        bh_group_to_creds: dict[str, list[Credential]] = {}
+        for cred in bh_priv_creds:
+            for grp in cred.bh_groups:
+                bh_group_to_creds.setdefault(grp, []).append(cred)
+
+        total_notable = len(target_creds) + len(bh_priv_creds)
+        unique_cracked = len([c for c in target_creds if c.is_cracked]) + len([c for c in bh_priv_creds if c.is_cracked])
+        header("High Value Targets", f"{C.G}{unique_cracked}{C.X}/{total_notable} cracked")
 
         sorted_files = sorted(file_to_creds.items(), key=lambda x: x[0])
         for file_idx, (filename, creds) in enumerate(sorted_files):
@@ -601,27 +872,66 @@ def main():
                         right_len = len(cred.cleartext)
                     dots_len = WIDTH - left_len - right_len
                     dots = " " + "·" * max(dots_len - 2, 1) + " "
-                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.R}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{pwd_display}")
+                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{pwd_display}")
                 else:
                     not_cracked = "(not cracked)"
                     right_len = len(not_cracked)
                     dots_len = WIDTH - left_len - right_len
                     dots = " " + "·" * max(dots_len - 2, 1) + " "
-                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.R}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{C.O}{not_cracked}{C.X}")
+                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{C.O}{not_cracked}{C.X}")
 
             # Empty line between file groups (except after last)
             if not is_last_file:
                 print(f"  {C.DM}│{C.X}")
 
+        # BloodHound-privileged accounts grouped by group name
+        if bh_group_to_creds:
+            if file_to_creds:
+                print()  # separator between target-file block and BH block
+            TIER1_GROUPS = {"enterprise admins", "domain admins", "administrators"}
+            sorted_bh_groups = sorted(
+                bh_group_to_creds.items(),
+                key=lambda x: (0 if x[0].lower() in TIER1_GROUPS else 1, x[0].lower())
+            )
+            for grp_idx, (grp, grp_creds) in enumerate(sorted_bh_groups):
+                is_last_grp = (grp_idx == len(sorted_bh_groups) - 1)
+                grp_cracked = len([c for c in grp_creds if c.is_cracked])
+                count_str = f"{grp_cracked} / {len(grp_creds)}"
+                grp_prefix = "└─" if is_last_grp else "├─"
+                left_len = 5 + len(grp)
+                right_len = len(count_str)
+                dots = " " + "·" * max(WIDTH - left_len - right_len - 2, 1) + " "
+                print(f"  {C.DM}{grp_prefix}{C.X} {C.O}{grp}{C.X}{C.DM}{dots}{C.X}{C.DM}{count_str}{C.X}")
+
+                tree_prefix = "   " if is_last_grp else "│  "
+                sorted_creds = sorted(grp_creds, key=lambda c: (not c.is_cracked, c.down_level_logon_name))
+                for cred_idx, cred in enumerate(sorted_creds):
+                    is_last_cred = (cred_idx == len(sorted_creds) - 1)
+                    cred_prefix = "└─" if is_last_cred else "├─"
+                    left_len = 8 + len(cred.down_level_logon_name)
+                    if cred.is_cracked:
+                        pwd_display = redact(cred.cleartext)
+                        right_len = 12 if (args.redact or args.redact_partial) else len(cred.cleartext)
+                        dots = " " + "·" * max(WIDTH - left_len - right_len - 2, 1) + " "
+                        print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{pwd_display}")
+                    else:
+                        tag = "(not cracked)"
+                        dots = " " + "·" * max(WIDTH - left_len - len(tag) - 2, 1) + " "
+                        print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{C.O}{tag}{C.X}")
+
+                if not is_last_grp:
+                    print(f"  {C.DM}│{C.X}")
+
     # ==========================================================================
     # Shared Target Credentials
     # ==========================================================================
-    if targets and not target_shared_hashes:
+    has_notable = bool(targets or bh_groups)
+    if has_notable and not target_shared_hashes:
         header("Shared Target Credentials", "none")
-        print(f"  {C.DM}No target accounts share a password hash with any other account{C.X}")
+        print(f"  {C.DM}No notable accounts share a password hash with any other account{C.X}")
         print()
 
-    if targets and target_shared_hashes:
+    if has_notable and target_shared_hashes:
         total_shared_accounts = sum(len(creds) for creds in target_shared_hashes.values())
         header("Shared Target Credentials", f"{C.G}{len(target_shared_hashes)}{C.X} groups, {total_shared_accounts} accounts")
 
@@ -629,7 +939,20 @@ def main():
         all_shared_creds = [c for creds in target_shared_hashes.values() for c in creds]
         max_name_len = max(len(c.down_level_logon_name) for c in all_shared_creds) if all_shared_creds else 30
 
-        sorted_groups = sorted(target_shared_hashes.items(), key=lambda x: -len(x[1]))
+        SHARED_TIER1 = {"enterprise admins", "domain admins", "administrators"}
+
+        def shared_group_priority(item):
+            _, creds = item
+            # Tier 0: group contains a tier-1 BH-privileged account
+            has_tier1 = any(
+                any(g.lower() in SHARED_TIER1 for g in c.bh_groups)
+                for c in creds if is_notable(c)
+            )
+            # Tier 1: group contains any other notable account
+            has_notable = any(is_notable(c) for c in creds)
+            return (0 if has_tier1 else 1 if has_notable else 2, -len(creds))
+
+        sorted_groups = sorted(target_shared_hashes.items(), key=shared_group_priority)
         for group_idx, (hash_val, creds) in enumerate(sorted_groups):
             is_last_group = (group_idx == len(sorted_groups) - 1)
             cleartext = ""
@@ -669,84 +992,121 @@ def main():
             count_display = f"{C.DM}{count_str}{C.X}"
             print(f"  {C.DM}{group_prefix}{C.X} {pwd_display}{C.DM}{dots}{C.X}{count_display}")
 
-            # List all accounts (targets first, then others)
-            target_creds_in_group = sorted([c for c in creds if c.is_target])
-            other_creds = sorted([c for c in creds if not c.is_target])
-            all_sorted = target_creds_in_group + other_creds
+            # List all accounts (notable first, then others)
+            notable_in_group = sorted([c for c in creds if is_notable(c)])
+            other_creds = sorted([c for c in creds if not is_notable(c)])
+            all_sorted = notable_in_group + other_creds
 
             tree_prefix = "   " if is_last_group else "│  "
             for i, cred in enumerate(all_sorted):
                 is_last = (i == len(all_sorted) - 1)
                 cred_prefix = "└─" if is_last else "├─"
 
-                # "  │  ├─ " = 8 chars prefix
                 left_len = 8 + len(cred.down_level_logon_name)
 
-                if cred.is_target:
-                    # Build labels, truncating if needed to leave room for dots
-                    MIN_DOTS = 10  # Minimum space for " ········ "
-                    max_label_len = WIDTH - left_len - MIN_DOTS
+                if is_notable(cred):
+                    plain_lbl = cred_right_label(cred)
+                    colored_lbl = cred_right_label_colored(cred)
+                    # Truncate target-file labels if too long (BH group names are short)
+                    if cred.is_target:
+                        MIN_DOTS = 10
+                        max_label_len = WIDTH - left_len - MIN_DOTS
+                        label_list = [target_label(f) for f in cred.target_files]
+                        file_list = list(cred.target_files)
+                        included_idx = []
+                        current_len = 0
+                        for label_idx, lbl in enumerate(label_list):
+                            sep_len = 2 if label_idx > 0 else 0
+                            if current_len + sep_len + len(lbl) <= max_label_len:
+                                included_idx.append(label_idx)
+                                current_len += sep_len + len(lbl)
+                            else:
+                                break
+                        remaining = len(label_list) - len(included_idx)
+                        if remaining > 0:
+                            suffix_len = 2 + len(f"+{remaining}")
+                            while included_idx and current_len + suffix_len > max_label_len:
+                                removed_idx = included_idx.pop()
+                                current_len -= len(label_list[removed_idx]) + (2 if included_idx else 0)
+                                remaining += 1
+                                suffix_len = 2 + len(f"+{remaining}")
+                        plain_lbl = ", ".join(label_list[i] for i in included_idx)
+                        colored_lbl = ", ".join(f"{label_color(file_list[i])}{label_list[i]}{C.X}" for i in included_idx)
+                        if remaining > 0:
+                            plain_lbl += f", +{remaining}"
+                            colored_lbl += f"{C.DM}, {C.Y}+{remaining}{C.X}"
 
-                    label_list = [target_label(f) for f in cred.target_files]
-                    file_list = list(cred.target_files)
-
-                    # Include as many labels as fit
-                    included_idx = []
-                    current_len = 0
-                    for label_idx, label in enumerate(label_list):
-                        sep_len = 2 if label_idx > 0 else 0  # ", "
-                        if current_len + sep_len + len(label) <= max_label_len:
-                            included_idx.append(label_idx)
-                            current_len += sep_len + len(label)
-                        else:
-                            break
-
-                    # If truncated, make room for "+N" suffix
-                    remaining = len(label_list) - len(included_idx)
-                    if remaining > 0:
-                        suffix = f"+{remaining}"
-                        suffix_len = 2 + len(suffix)  # ", +N"
-                        while included_idx and current_len + suffix_len > max_label_len:
-                            removed_idx = included_idx.pop()
-                            current_len -= len(label_list[removed_idx]) + (2 if included_idx else 0)
-                            remaining += 1
-                            suffix = f"+{remaining}"
-                            suffix_len = 2 + len(suffix)
-
-                    # Build final strings
-                    labels = ", ".join(label_list[i] for i in included_idx)
-                    colored_labels = ", ".join(f"{label_color(file_list[i])}{label_list[i]}{C.X}" for i in included_idx)
-                    if remaining > 0:
-                        labels += f", +{remaining}"
-                        colored_labels += f"{C.DM}, {C.Y}+{remaining}{C.X}"
-
-                    right_len = len(labels)
-                    dots_len = WIDTH - left_len - right_len
-                    dots = " " + "·" * max(dots_len - 2, 1) + " "
-                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.R}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{colored_labels}")
+                    right_len = len(plain_lbl)
+                    dots = " " + "·" * max(WIDTH - left_len - right_len - 2, 1) + " "
+                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{colored_lbl}")
                 else:
-                    not_target = "(not a target)"
-                    right_len = len(not_target)
-                    dots_len = WIDTH - left_len - right_len
-                    dots = " " + "·" * max(dots_len - 2, 1) + " "
-                    print(f"  {C.DM}{tree_prefix}{cred_prefix} {cred.down_level_logon_name}{dots}{C.X}{C.G}{not_target}{C.X}")
+                    not_notable = "(not a target)"
+                    dots = " " + "·" * max(WIDTH - left_len - len(not_notable) - 2, 1) + " "
+                    print(f"  {C.DM}{tree_prefix}{cred_prefix} {cred.down_level_logon_name}{dots}{C.X}{C.G}{not_notable}{C.X}")
 
             # Empty line between groups (except after last)
             if not is_last_group:
                 print(f"  {C.DM}│{C.X}")
 
-        # Summary of other shared passwords (non-target)
+        # Summary of other shared passwords (non-notable accounts)
         other_shared = {h: creds for h, creds in shared_hashes.items()
-                        if not any(c.is_target for c in creds)}
+                        if not any(is_notable(c) for c in creds)}
         if other_shared:
             other_users = sum(len(creds) for creds in other_shared.values())
             print()
             print(f"  {C.DM}+ {len(other_shared)} non-target groups ({other_users} users) also share passwords{C.X}")
 
     # ==========================================================================
+    # Cross-Domain Shared Passwords
+    # ==========================================================================
+    # Find NT hashes present in more than one domain (excludes machine accounts and null hashes)
+    cross_domain_hashes: dict[str, list] = {}
+    for h, creds in hash_to_creds.items():
+        domains = {c.domain.upper() for c in creds if c.domain and not c.is_machine}
+        if len(domains) > 1:
+            cross_domain_hashes[h] = [c for c in creds if c.domain and not c.is_machine]
+
+    if cross_domain_hashes:
+        total_xd_accounts = sum(len(c) for c in cross_domain_hashes.values())
+        header("Cross-Domain Shared Passwords", f"{C.R}{len(cross_domain_hashes)}{C.X} groups, {total_xd_accounts} accounts")
+
+        sorted_xd = sorted(cross_domain_hashes.items(), key=lambda x: -len(x[1]))
+        for grp_idx, (hash_val, creds) in enumerate(sorted_xd):
+            is_last_grp = (grp_idx == len(sorted_xd) - 1)
+            grp_prefix = "└─" if is_last_grp else "├─"
+            domains = sorted({c.domain.upper() for c in creds})
+            cleartext = next((c.cleartext for c in creds if c.is_cracked), "")
+
+            if cleartext:
+                pwd_display = redact(cleartext)
+                pwd_visible = 12 if (args.redact or args.redact_partial) else len(cleartext)
+            else:
+                hash_display = redact(hash_val, color=False) if (args.redact or args.redact_partial) else hash_val
+                pwd_display = f"{C.O}{hash_display} (not cracked){C.X}"
+                pwd_visible = (12 if (args.redact or args.redact_partial) else len(hash_val)) + len(" (not cracked)")
+
+            domain_str = f"{len(domains)} domains, {len(creds)} accounts"
+            left_len = 5 + pwd_visible
+            dots = " " + "·" * max(WIDTH - left_len - len(domain_str) - 2, 1) + " "
+            print(f"  {C.DM}{grp_prefix}{C.X} {pwd_display}{C.DM}{dots}{C.X}{C.Y}{domain_str}{C.X}")
+
+            tree_prefix = "   " if is_last_grp else "│  "
+            sorted_creds = sorted(creds, key=lambda c: (c.domain.upper(), c.down_level_logon_name))
+            for cred_idx, cred in enumerate(sorted_creds):
+                is_last_cred = (cred_idx == len(sorted_creds) - 1)
+                cred_prefix = "└─" if is_last_cred else "├─"
+                domain_tag = f"{C.DM}[{cred.domain.upper()}]{C.X} "
+                name_color = C.R if cred.is_target else ""
+                name_reset = C.X if cred.is_target else ""
+                print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {domain_tag}{name_color}{cred.down_level_logon_name}{name_reset}")
+
+            if not is_last_grp:
+                print(f"  {C.DM}│{C.X}")
+
+    # ==========================================================================
     # Password Analysis
     # ==========================================================================
-    cracked_passwords = [c.cleartext for c in all_credentials if c.is_cracked and c.cleartext]
+    cracked_passwords = [c.cleartext for c in all_credentials if c.is_cracked and c.cleartext and not c.is_history]
     if cracked_passwords:
         unique_passwords = list(set(cracked_passwords))
         header("Password Analysis", f"{C.G}{len(unique_passwords)}{C.X} unique passwords")
@@ -754,6 +1114,7 @@ def main():
         # ── Username in Password ──
         username_in_pwd_creds = [c for c in all_credentials
                                   if c.is_cracked and c.cleartext and c.sam_account_name
+                                  and not c.is_history
                                   and c.sam_account_name.lower() in c.cleartext.lower()]
         if username_in_pwd_creds:
             count = len(username_in_pwd_creds)
@@ -782,10 +1143,10 @@ def main():
                     if cred.is_target:
                         labels = ", ".join(f"{label_color(f)}({target_label(f)}){C.X}" for f in cred.target_files)
                         labels_visible = len(", ".join(f"({target_label(f)})" for f in cred.target_files))
-                        left_side = f"{C.R}{cred.sam_account_name}{C.X}  {labels}"
+                        left_side = f"{C.W}{cred.sam_account_name}{C.X}  {labels}"
                         left_len = 5 + len(cred.sam_account_name) + 2 + labels_visible
                     else:
-                        left_side = f"{C.R}{cred.sam_account_name}{C.X}"
+                        left_side = f"{C.W}{cred.sam_account_name}{C.X}"
                         left_len = 5 + len(cred.sam_account_name)
                     # Password on right
                     right_len = len(cred.cleartext)
@@ -1060,10 +1421,11 @@ def main():
 
             # Full CSV export (all credentials with metadata)
             csv_file = output_dir / "tt-all.csv"
+            non_history = [c for c in all_credentials if not c.is_history]
             with open(csv_file, "w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["domain", "username", "password", "target_file", "lm_hash", "empty", "shared_count"])
-                for cred in sorted(all_credentials):
+                for cred in sorted(non_history):
                     domain = cred.down_level_logon_name.split("\\")[0] if "\\" in cred.down_level_logon_name else ""
                     pwd = redact(cred.cleartext, color=False) if cred.is_cracked else ""
                     target_file = ", ".join(target_label(f) for f in cred.target_files) if cred.is_target else ""
@@ -1075,12 +1437,129 @@ def main():
                         target_file,
                         "yes" if cred.lm_hash and cred.lm_hash != NULL_LM else "no",
                         "yes" if cred.nt_hash == NULL_NT else "no",
-                        shared_count if shared_count > 1 else ""
+                        shared_count if shared_count > 1 else "",
                     ])
-            files_saved.append((csv_file.name, f"{len(all_credentials)} rows"))
+            files_saved.append((csv_file.name, f"{len(non_history)} rows"))
+
+            # Password history export
+            all_history_creds = [c for c in all_credentials if c.is_history]
+            if all_history_creds:
+                # Build per-account history map (all history entries, not just cracked)
+                hist_by_base: dict[str, list] = {}
+                for c in all_history_creds:
+                    base_key = f"{c.domain}\\{c.history_base}" if c.domain else c.history_base
+                    hist_by_base.setdefault(base_key, []).append(c)
+
+                # Build lookup for current (non-history) accounts by down_level_logon_name
+                current_lookup: dict[str, "Credential"] = {
+                    c.down_level_logon_name.lower(): c
+                    for c in all_credentials if not c.is_history and not c.is_machine
+                }
+
+                # Assemble per-account entries with analysis
+                # Each entry: (base_key, current_cred|None, hist_sorted, patterns, tier)
+                # tier: 0=high-priv, 1=target, 2=other
+                account_entries = []
+                for base_key, hist_list in hist_by_base.items():
+                    hist_sorted = sorted(hist_list, key=lambda c: c.history_index)
+                    # Only include if at least one entry (current or history) is cracked
+                    current = current_lookup.get(base_key.lower())
+                    any_cracked = (current and current.is_cracked) or any(h.is_cracked for h in hist_sorted)
+                    if not any_cracked:
+                        continue
+
+                    cracked_pwds = []
+                    if current and current.is_cracked:
+                        cracked_pwds.append(current.cleartext)
+                    cracked_pwds += [h.cleartext for h in hist_sorted if h.is_cracked]
+
+                    patterns = []
+                    reuse = (current and current.hash and
+                             any(h.hash == current.hash for h in hist_sorted))
+                    if reuse:
+                        patterns.append("PASSWORD REUSE")
+                    if detect_incremental(cracked_pwds):
+                        patterns.append("INCREMENTAL ROTATION")
+
+                    # Tier: 0=privileged (RID or BloodHound), 1=target file, 2=everyone else
+                    if current and (current.priv_label or current.bh_groups):
+                        tier = 0
+                        tier_label = "PRIVILEGED"
+                    elif current and current.is_target:
+                        tier = 1
+                        tier_label = "TARGET"
+                    else:
+                        tier = 2
+                        tier_label = ""
+
+                    account_entries.append((base_key, current, hist_sorted, patterns, tier, tier_label))
+
+                if account_entries:
+                    # Sort: tier asc, then patterns (flagged first), then name
+                    account_entries.sort(key=lambda x: (x[4], not bool(x[3]), x[0].lower()))
+
+                    hist_file = output_dir / "tt-history.txt"
+                    cracked_hist_count = sum(
+                        sum(1 for h in hist_sorted if h.is_cracked)
+                        for _, _, hist_sorted, _, _, _ in account_entries
+                    )
+                    with open(hist_file, "w") as f:
+                        current_tier = -1
+                        for base_key, current, hist_sorted, patterns, tier, tier_label in account_entries:
+                            # Tier section header
+                            if tier != current_tier:
+                                current_tier = tier
+                                if tier == 0:
+                                    f.write("=" * 60 + "\n")
+                                    f.write("PRIVILEGED ACCOUNTS\n")
+                                    f.write("=" * 60 + "\n\n")
+                                elif tier == 1:
+                                    f.write("=" * 60 + "\n")
+                                    f.write("TARGET ACCOUNTS\n")
+                                    f.write("=" * 60 + "\n\n")
+                                else:
+                                    f.write("=" * 60 + "\n")
+                                    f.write("OTHER ACCOUNTS\n")
+                                    f.write("=" * 60 + "\n\n")
+
+                            # Account header
+                            f.write(f"[{base_key}]\n")
+
+                            # Privilege context
+                            if current:
+                                if current.priv_label:
+                                    f.write(f"  RID Role: {current.priv_label}\n")
+                                if current.bh_groups:
+                                    f.write(f"  Groups  : {', '.join(current.bh_groups)}\n")
+                                if current.is_target:
+                                    f.write(f"  Target  : {', '.join(target_label(tf) for tf in current.target_files)}\n")
+
+                            # Patterns detected
+                            if patterns:
+                                f.write(f"  Patterns: {', '.join(patterns)}\n")
+
+                            f.write("\n")
+
+                            # Current password
+                            if current:
+                                pwd_str = redact(current.cleartext, color=False) if current.is_cracked else "(not cracked)"
+                                f.write(f"  current   : {pwd_str}\n")
+
+                            # History entries
+                            for h in hist_sorted:
+                                pwd_str = redact(h.cleartext, color=False) if h.is_cracked else "(not cracked)"
+                                reuse_tag = " [REUSE]" if (h.hash == current.hash if current else False) else ""
+                                f.write(f"  history{h.history_index:<3}: {pwd_str}{reuse_tag}\n")
+
+                            f.write("\n")
+
+                    files_saved.append((hist_file.name, f"{len(account_entries)} accounts, {cracked_hist_count} cracked history entries"))
         except OSError as e:
             error(f"Failed to write output file: {e}")
             sys.exit(1)
+
+        if _tee_file:
+            files_saved.insert(0, ("tt-output.txt", "full terminal output"))
 
         # Print saved files as tree
         print(f"  {C.G}Saved to {output_dir}/{C.X}")
@@ -1088,6 +1567,11 @@ def main():
             is_last = (i == len(files_saved) - 1)
             prefix = "└─" if is_last else "├─"
             print(f"  {C.DM}{prefix}{C.X} {filename}  {C.DM}{desc}{C.X}")
+
+        # Close tee after summary so the full output including this block is captured
+        if _tee_file:
+            sys.stdout = sys.stdout._real
+            _tee_file.close()
     else:
         # Hint about exporting
         print()
