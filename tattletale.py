@@ -22,7 +22,7 @@ from statistics import median
 # Constants
 # =============================================================================
 
-VERSION = "3.3.0"
+VERSION = "3.4.0"
 MAX_DISPLAY = 10  # Maximum items to show in lists before truncating
 HIST_HEIGHT = 8  # Rows for histogram display
 BAR_MAX_WIDTH = 12  # Maximum width for bar charts
@@ -274,84 +274,83 @@ def parse_bloodhound_zip(filepath: Path) -> dict[str, list[str]]:
         error(f"Failed to open BloodHound zip: {e}")
         sys.exit(1)
 
-    names = zf.namelist()
+    with zf:
+        names = zf.namelist()
 
-    def find_file(keyword: str) -> str | None:
-        """Find a file in the zip whose name contains keyword (case-insensitive)."""
-        for n in names:
-            base = n.split("/")[-1].lower()
-            if keyword in base and base.endswith(".json"):
-                return n
-        return None
+        def find_file(keyword: str) -> str | None:
+            """Find a file in the zip whose name contains keyword (case-insensitive)."""
+            for n in names:
+                base = n.split("/")[-1].lower()
+                if keyword in base and base.endswith(".json"):
+                    return n
+            return None
 
-    users_file = find_file("users")
-    groups_file = find_file("groups")
+        users_file = find_file("users")
+        groups_file = find_file("groups")
 
-    if not groups_file:
-        error("BloodHound zip does not contain a groups JSON file")
-        sys.exit(1)
+        if not groups_file:
+            error("BloodHound zip does not contain a groups JSON file")
+            sys.exit(1)
 
-    # ── Build SID → sAMAccountName map from users file ──
-    sid_to_sam: dict[str, str] = {}
-    if users_file:
+        # ── Build SID → sAMAccountName map from users file ──
+        sid_to_sam: dict[str, str] = {}
+        if users_file:
+            try:
+                users_data = json.loads(zf.read(users_file).decode("utf-8", errors="replace"))
+            except (json.JSONDecodeError, KeyError):
+                users_data = {}
+
+            entries = users_data.get("data", users_data) if isinstance(users_data, dict) else users_data
+            if isinstance(entries, list):
+                for entry in entries:
+                    props = entry.get("Properties", {})
+                    oid = entry.get("ObjectIdentifier", "")
+                    sam = props.get("samaccountname", "") or props.get("sAMAccountName", "")
+                    # Fallback: derive from name "USER@DOMAIN"
+                    if not sam:
+                        name = props.get("name", "")
+                        if "@" in name:
+                            sam = name.split("@")[0]
+                    if oid and sam:
+                        sid_to_sam[oid.upper()] = sam.lower()
+
+        # ── Parse groups and build sam → [group_names] ──
         try:
-            users_data = json.loads(zf.read(users_file).decode("utf-8", errors="replace"))
-        except (json.JSONDecodeError, KeyError):
-            users_data = {}
+            groups_data = json.loads(zf.read(groups_file).decode("utf-8", errors="replace"))
+        except json.JSONDecodeError as e:
+            error(f"Failed to parse BloodHound groups file: {e}")
+            sys.exit(1)
 
-        entries = users_data.get("data", users_data) if isinstance(users_data, dict) else users_data
-        if isinstance(entries, list):
-            for entry in entries:
-                props = entry.get("Properties", {})
-                oid = entry.get("ObjectIdentifier", "")
-                sam = props.get("samaccountname", "") or props.get("sAMAccountName", "")
-                # Fallback: derive from name "USER@DOMAIN"
+        result: dict[str, list[str]] = {}
+
+        entries = groups_data.get("data", groups_data) if isinstance(groups_data, dict) else groups_data
+        if not isinstance(entries, list):
+            return result
+
+        for group in entries:
+            props = group.get("Properties", {})
+            raw_name = props.get("name", "")
+            # Group name may be "DOMAIN ADMINS@CORP.LOCAL" — take the part before @
+            group_name = raw_name.split("@")[0].strip().lower() if "@" in raw_name else raw_name.lower()
+
+            if group_name not in HIGH_PRIV_GROUPS:
+                continue
+
+            display_name = group_name.title()
+            members = group.get("Members", [])
+
+            for member in members:
+                if member.get("ObjectType", "").lower() != "user":
+                    continue
+                member_sid = member.get("ObjectIdentifier", "").upper()
+                sam = sid_to_sam.get(member_sid, "")
                 if not sam:
-                    name = props.get("name", "")
-                    if "@" in name:
-                        sam = name.split("@")[0]
-                if oid and sam:
-                    sid_to_sam[oid.upper()] = sam.lower()
+                    continue
+                result.setdefault(sam, [])
+                if display_name not in result[sam]:
+                    result[sam].append(display_name)
 
-    # ── Parse groups and build sam → [group_names] ──
-    try:
-        groups_data = json.loads(zf.read(groups_file).decode("utf-8", errors="replace"))
-    except json.JSONDecodeError as e:
-        error(f"Failed to parse BloodHound groups file: {e}")
-        sys.exit(1)
-
-    result: dict[str, list[str]] = {}
-
-    entries = groups_data.get("data", groups_data) if isinstance(groups_data, dict) else groups_data
-    if not isinstance(entries, list):
         return result
-
-    for group in entries:
-        props = group.get("Properties", {})
-        raw_name = props.get("name", "")
-        # Group name may be "DOMAIN ADMINS@CORP.LOCAL" — take the part before @
-        group_name = raw_name.split("@")[0].strip().lower() if "@" in raw_name else raw_name.lower()
-
-        if group_name not in HIGH_PRIV_GROUPS:
-            continue
-
-        display_name = group_name.title()
-        members = group.get("Members", [])
-
-        for member in members:
-            if member.get("ObjectType", "").lower() != "user":
-                continue
-            member_sid = member.get("ObjectIdentifier", "").upper()
-            sam = sid_to_sam.get(member_sid, "")
-            if not sam:
-                # Last-resort: SID suffix heuristic won't help here, skip
-                continue
-            result.setdefault(sam, [])
-            if display_name not in result[sam]:
-                result[sam].append(display_name)
-
-    zf.close()
-    return result
 
 
 # =============================================================================
@@ -368,11 +367,15 @@ def detect_incremental(passwords: list[str]) -> bool:
         base = re.sub(r'^[\d!@#$%^&*()_+=\-]+', '', base).lower()
         if base:
             bases.add(base)
-    if len(bases) == 1 and bases:
+    if len(bases) == 1:
         return True
-    # Two or more passwords both contain a year → likely year-based rotation
-    if sum(1 for p in passwords if re.search(r'(19|20)\d{2}', p)) >= 2:
-        return True
+    # Year-based rotation: 2+ passwords share a base AND contain different years
+    if len(bases) <= 2:
+        year_passwords = [p for p in passwords if re.search(r'(19|20)\d{2}', p)]
+        if len(year_passwords) >= 2:
+            years = {re.search(r'(19|20)\d{2}', p).group() for p in year_passwords}
+            if len(years) >= 2:
+                return True
     return False
 
 
@@ -553,6 +556,7 @@ def main():
 
     # If --output is set, tee all terminal output to tt-output.txt as well
     _tee_file = None
+    _original_stdout = sys.stdout
     if args.output:
         try:
             _out_dir = Path(args.output)
@@ -565,15 +569,16 @@ def main():
                     self._tee = tee
                 def write(self, data):
                     self._real.write(data)
-                    # Strip ANSI codes before writing to file
                     self._tee.write(ANSI_ESCAPE.sub('', data))
                 def flush(self):
                     self._real.flush()
                     self._tee.flush()
                 def fileno(self):
                     return self._real.fileno()
+                def isatty(self):
+                    return self._real.isatty()
 
-            sys.stdout = _Tee(sys.stdout, _tee_file)
+            sys.stdout = _Tee(_original_stdout, _tee_file)
         except OSError:
             pass  # Non-fatal; output continues normally to terminal
 
@@ -1570,12 +1575,18 @@ def main():
 
         # Close tee after summary so the full output including this block is captured
         if _tee_file:
-            sys.stdout = sys.stdout._real
+            sys.stdout = _original_stdout
             _tee_file.close()
+            _tee_file = None
     else:
         # Hint about exporting
         print()
         print(f"{C.DM}Tip: Use --output <dir> to export results to files{C.X}")
+
+    # Restore stdout if tee is still active (e.g. exception path skipped export)
+    if _tee_file:
+        sys.stdout = _original_stdout
+        _tee_file.close()
 
     print()
 
