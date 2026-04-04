@@ -50,19 +50,30 @@ docker run --rm -v "$(pwd)/data:/mnt/shared" tattletale \
 ## Usage
 
 ```
-tattletale -d <file> [-p <file>] [-t <files>] [options]
+tattletale -d <file> -p <file> -b <zip> [options]
 
 REQUIRED
     -d, --dit <file>            NTDS.DIT dump file from secretsdump
 
-OPTIONS
+RECOMMENDED
     -p, --pot <file>            Hashcat potfile with cracked hashes
-    -t, --targets <files>       Target lists, space-separated (e.g. -t admins.txt svc.txt)
+    -b, --bloodhound <zip>      SharpHound zip export for privileged group identification
+
+OPTIONS
+    -t, --targets <files>       Additional target lists (e.g. -t svc_accounts.txt)
     -o, --output <dir>          Export reports to directory
     -r, --redact                Hide passwords completely (************)
     -R, --redact-partial        Show first two chars only (Pa**********)
     -h, --help                  Show this help message
     -v, --version               Show version number
+
+SHOW (limit output to specific sections — shows all when omitted)
+    --show-stats                Statistics and security warnings
+    --show-krbtgt               krbtgt / Golden Ticket detection
+    --show-targets              High value targets
+    --show-shared               Shared target credentials
+    --show-cross-domain         Cross-domain shared passwords
+    --show-analysis             Password analysis and patterns
 
 POLICY (check cracked passwords against requirements)
     --policy-length <n>         Minimum password length
@@ -73,20 +84,23 @@ POLICY (check cracked passwords against requirements)
 ## Examples
 
 ```bash
-# Basic analysis - just the dump file
+# Full analysis — cracked hashes + BloodHound privileged group context
+tattletale -d ntds.dit -p cracked.pot -b BloodHound.zip
+
+# With additional target lists for accounts not in BloodHound
+tattletale -d ntds.dit -p cracked.pot -b BloodHound.zip -t svc_accounts.txt
+
+# Basic analysis (DIT only)
 tattletale -d ntds.dit
 
-# With cracked hashes from hashcat
-tattletale -d ntds.dit -p hashcat.pot
-
-# Track high-value targets (multiple lists works)
-tattletale -d ntds.dit -p hashcat.pot -t domain_admins.txt svc_accounts.txt
+# Target lists without BloodHound
+tattletale -d ntds.dit -p cracked.pot -t domain_admins.txt local_admins.txt
 
 # Redacted output for screenshotting
-tattletale -d ntds.dit -p hashcat.pot -r
+tattletale -d ntds.dit -p cracked.pot -r
 
 # Check cracked passwords against policy (8 chars, 3-of-4 complexity)
-tattletale -d ntds.dit -p hashcat.pot --policy-length 8 --policy-complexity 3
+tattletale -d ntds.dit -p cracked.pot --policy-length 8 --policy-complexity 3
 ```
 
 ## Output
@@ -99,15 +113,21 @@ Overview of the dump: total accounts, cracking progress, hash types, and securit
 
 ### High Value Targets
 
-Shows the status of accounts from your target lists.
+Tracks accounts from target lists and BloodHound-identified privileged group members. Grouped by source with cracked passwords displayed inline.
 
 ![High Value Targets](assets/tt_targets.png)
 
 ### Shared Credentials
 
-Accounts that share the same password hash. Grouped by password with target accounts highlighted.
+Accounts that share the same password hash. Grouped by password with target and privileged accounts highlighted.
 
 ![Shared Credentials](assets/tt_shared_creds.png)
+
+### Cross-Domain Shared Passwords
+
+Detects identical NT hashes appearing across multiple domains. Highlights lateral movement risk in multi-domain environments.
+
+![Cross-Domain](assets/tt_cross_domain.png)
 
 ### Password Analysis
 
@@ -122,6 +142,7 @@ Pattern analysis across all cracked passwords: length distribution, character co
 | DIT dump | secretsdump output | `DOMAIN\user:1001:LM_HASH:NT_HASH:::` |
 | Potfile | hashcat potfile | `NT_HASH:cleartext` |
 | Targets | one username per line | `administrator` |
+| BloodHound | SharpHound zip export | `20240115_BloodHound.zip` |
 
 ## See also
 
@@ -129,7 +150,7 @@ Standing on the shoulders of giants:
 
 - [secretsdump.py](https://github.com/fortra/impacket) - extract hashes from NTDS.DIT
 - [hashcat](https://hashcat.net/hashcat/) - crack the hashes
-- [CrackMapExec](https://github.com/byt3bl33d3r/CrackMapExec) - password spraying and more
+- [BloodHound](https://github.com/BloodHoundAD/BloodHound) - map Active Directory attack paths
 
 ## License
 

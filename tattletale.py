@@ -277,7 +277,7 @@ def parse_bloodhound_zip(filepath: Path) -> dict[str, list[str]]:
     with zf:
         names = zf.namelist()
 
-        def find_file(keyword: str) -> str | None:
+        def find_file(keyword: str):
             """Find a file in the zip whose name contains keyword (case-insensitive)."""
             for n in names:
                 base = n.split("/")[-1].lower()
@@ -451,20 +451,30 @@ def print_help():
     print(f"{C.C}{TITLE}{C.X}")
     print()
     print(f"{C.BD}USAGE{C.X}")
-    print(f"    tattletale -d <file> [-p <file>] [-t <files>] [-b <zip>] [options]")
+    print(f"    tattletale -d <file> -p <file> -b <zip> [options]")
     print()
     print(f"{C.BD}REQUIRED{C.X}")
     print(f"    {C.C}-d, --dit{C.X} <file>           NTDS.DIT dump file from secretsdump")
     print()
-    print(f"{C.BD}OPTIONS{C.X}")
+    print(f"{C.BD}RECOMMENDED{C.X}")
     print(f"    {C.C}-p, --pot{C.X} <file>           Hashcat potfile with cracked hashes")
-    print(f"    {C.C}-t, --targets{C.X} <files>      Target lists, space-separated (e.g. -t admins.txt svc.txt)")
-    print(f"    {C.C}-b, --bloodhound{C.X} <zip>     BloodHound/SharpHound zip export for group membership context")
+    print(f"    {C.C}-b, --bloodhound{C.X} <zip>     SharpHound zip export for privileged group identification")
+    print()
+    print(f"{C.BD}OPTIONS{C.X}")
+    print(f"    {C.C}-t, --targets{C.X} <files>      Additional target lists (e.g. -t svc_accounts.txt)")
     print(f"    {C.C}-o, --output{C.X} <dir>         Export reports to directory")
     print(f"    {C.C}-r, --redact{C.X}               Hide passwords completely (************)")
     print(f"    {C.C}-R, --redact-partial{C.X}       Show first two chars only (Pa**********)")
     print(f"    {C.C}-h, --help{C.X}                 Show this help message")
     print(f"    {C.C}-v, --version{C.X}              Show version number")
+    print()
+    print(f"{C.BD}SHOW{C.X} {C.DM}(limit output to specific sections — shows all when omitted){C.X}")
+    print(f"    {C.C}--show-stats{C.X}               Statistics and security warnings")
+    print(f"    {C.C}--show-krbtgt{C.X}              krbtgt / Golden Ticket detection")
+    print(f"    {C.C}--show-targets{C.X}             High value targets")
+    print(f"    {C.C}--show-shared{C.X}              Shared target credentials")
+    print(f"    {C.C}--show-cross-domain{C.X}        Cross-domain shared passwords")
+    print(f"    {C.C}--show-analysis{C.X}            Password analysis and patterns")
     print()
     print(f"{C.BD}POLICY{C.X} {C.DM}(check cracked passwords against requirements){C.X}")
     print(f"    {C.C}--policy-length{C.X} <n>        Minimum password length")
@@ -472,20 +482,17 @@ def print_help():
     print(f"                               {C.DM}(uppercase, lowercase, digit, symbol){C.X}")
     print()
     print(f"{C.BD}EXAMPLES{C.X}")
-    print(f"    {C.DM}# Basic analysis{C.X}")
+    print(f"    {C.DM}# Full analysis — cracked hashes + BloodHound privileged group context{C.X}")
+    print(f"    tattletale -d ntds.dit -p cracked.pot -b BloodHound.zip")
+    print()
+    print(f"    {C.DM}# With additional target lists for accounts not in BloodHound{C.X}")
+    print(f"    tattletale -d ntds.dit -p cracked.pot -b BloodHound.zip -t svc_accounts.txt")
+    print()
+    print(f"    {C.DM}# Basic analysis (DIT only){C.X}")
     print(f"    tattletale -d ntds.dit")
     print()
-    print(f"    {C.DM}# With cracked hashes{C.X}")
-    print(f"    tattletale -d ntds.dit -p hashcat.potfile")
-    print()
-    print(f"    {C.DM}# Full analysis with multiple target lists{C.X}")
+    print(f"    {C.DM}# Target lists without BloodHound{C.X}")
     print(f"    tattletale -d ntds.dit -p cracked.pot -t domain_admins.txt local_admins.txt")
-    print()
-    print(f"    {C.DM}# With BloodHound group membership enrichment{C.X}")
-    print(f"    tattletale -d ntds.dit -p cracked.pot -b BloodHound_2024.zip")
-    print()
-    print(f"    {C.DM}# Full analysis — cracked hashes, targets, and BloodHound context{C.X}")
-    print(f"    tattletale -d ntds.dit -p cracked.pot -t da.txt svc.txt -b BloodHound.zip")
     print()
     print(f"    {C.DM}# Redacted output for sharing{C.X}")
     print(f"    tattletale -d ntds.dit -p cracked.pot -r")
@@ -496,6 +503,7 @@ def print_help():
     print(f"{C.BD}INPUT FORMATS{C.X}")
     print(f"    {C.C}DIT file{C.X}      secretsdump format: DOMAIN\\user:RID:LM:NT:::")
     print(f"    {C.C}Potfile{C.X}       hashcat format: HASH:cleartext")
+    print(f"    {C.C}BloodHound{C.X}    SharpHound zip export (groups + users JSON)")
     print(f"    {C.C}Targets{C.X}       One username per line (SAM account name)")
     print()
 
@@ -526,6 +534,12 @@ def main():
     parser.add_argument("-R", "--redact-partial", action="store_true")
     parser.add_argument("--policy-length", type=int)
     parser.add_argument("--policy-complexity", type=int, choices=[1, 2, 3, 4])
+    parser.add_argument("--show-stats", action="store_true")
+    parser.add_argument("--show-krbtgt", action="store_true")
+    parser.add_argument("--show-targets", action="store_true")
+    parser.add_argument("--show-shared", action="store_true")
+    parser.add_argument("--show-cross-domain", action="store_true")
+    parser.add_argument("--show-analysis", action="store_true")
     parser.add_argument("-h", "--help", action="store_true")
 
     # Capture stderr to suppress argparse's ugly output
@@ -536,6 +550,11 @@ def main():
     except SystemExit:
         print_help()
         sys.exit(1)
+
+    # Section visibility — show all when no --show-* flags given
+    show_flags = [args.show_stats, args.show_krbtgt, args.show_targets,
+                  args.show_shared, args.show_cross_domain, args.show_analysis]
+    show_all = not any(show_flags)
 
     # Redaction function (fixed width to hide password length)
     def redact(password: str, color: bool = True) -> str:
@@ -550,8 +569,9 @@ def main():
             return f"{prefix}{gr}**********{x}"
         return password
 
-    # Banner
-    banner()
+    # Banner (skip when filtering to specific sections)
+    if show_all:
+        banner()
     print()
 
     # If --output is set, tee all terminal output to tt-output.txt as well
@@ -619,6 +639,19 @@ def main():
     else:
         print(f"  {C.Y}⚠ No potfile provided{C.X} {C.DM}(use -p/--pot to correlate cracked hashes){C.X}")
 
+    # Parse BloodHound zip
+    bh_groups: dict[str, list[str]] = {}
+    if args.bloodhound:
+        bh_path = Path(args.bloodhound)
+        if not bh_path.exists():
+            error(f"BloodHound zip not found: {args.bloodhound}")
+            sys.exit(1)
+        status(f"Parsing {bh_path.name}...")
+        bh_groups = parse_bloodhound_zip(bh_path)
+        print(f"  {C.DM}└─ Found {len(bh_groups)} users with high-priv group memberships{C.X}")
+    else:
+        print(f"  {C.Y}⚠ No BloodHound data provided{C.X} {C.DM}(use -b/--bloodhound for privileged group detection){C.X}")
+
     # Parse target files
     if args.targets:
         for target_path in args.targets:
@@ -634,19 +667,6 @@ def main():
                     cred.is_target = True
                     cred.target_files.append(path.name)
             print(f"  {C.DM}└─ Found {len(file_targets)} targets{C.X}")
-    else:
-        print(f"  {C.Y}⚠ No target file provided{C.X} {C.DM}(use -t/--targets to track high-value accounts){C.X}")
-
-    # Parse BloodHound zip
-    bh_groups: dict[str, list[str]] = {}
-    if args.bloodhound:
-        bh_path = Path(args.bloodhound)
-        if not bh_path.exists():
-            error(f"BloodHound zip not found: {args.bloodhound}")
-            sys.exit(1)
-        status(f"Parsing {bh_path.name}...")
-        bh_groups = parse_bloodhound_zip(bh_path)
-        print(f"  {C.DM}└─ Found {len(bh_groups)} users with high-priv group memberships{C.X}")
 
     # Remove duplicates
     all_credentials = list(dict.fromkeys(all_credentials))
@@ -670,77 +690,79 @@ def main():
     lm_creds = [c for c in all_credentials if c.lm_hash and c.lm_hash != NULL_LM]
     nt_creds = [c for c in all_credentials if c.nt_hash and c.nt_hash != NULL_NT]
 
-    # Header with crack rate
-    if valid_users:
-        pct = len(cracked_users) / len(valid_users)
-        header("Statistics", f"{C.G}{len(cracked_users)}{C.X}/{len(valid_users)} cracked ({pct*100:.0f}%)")
-    else:
-        header("Statistics")
-
-    # Compact stats
-    acct_parts = [f"{len(users)} users", f"{len(machines)} machines"]
-    if null_users:
-        acct_parts.append(f"{len(null_users)} empty")
-    print(f"  {C.DM}Accounts{C.X}   {', '.join(acct_parts)}")
-
-    hash_parts = [f"{len(nt_creds)} NT"]
-    if lm_creds:
-        hash_parts.append(f"{C.Y}{len(lm_creds)} LM (legacy){C.X}")
-    else:
-        hash_parts.append("0 LM")
-    print(f"  {C.DM}Hashes{C.X}     {', '.join(hash_parts)}")
-
-    if valid_users:
-        unique_hashes = len(set(c.hash for c in valid_users if c.hash))
-        unique_cracked = len(set(c.cleartext for c in cracked_users if c.cleartext))
-        print(f"  {C.DM}Unique{C.X}     {unique_cracked}/{unique_hashes} unique password hashes cracked")
-
-    # Security warnings with tree format
+    # Security-relevant lists (always computed — used by exports)
     empty_password_users = [c for c in users if c.nt_hash == NULL_NT]
     lm_users = [c for c in users if c.lm_hash and c.lm_hash != NULL_LM]
 
-    if empty_password_users:
-        print()
-        print(f"  {C.R}⚠ {len(empty_password_users)} accounts have NO PASSWORD{C.X} {C.DM}(often disabled, but verify){C.X}")
-        sorted_empty = sorted(empty_password_users, key=lambda c: (not c.is_target, c.sam_account_name))
-        display_count = min(len(sorted_empty), MAX_DISPLAY)
-        remaining = len(sorted_empty) - display_count
-        for i, cred in enumerate(sorted_empty[:display_count]):
-            is_last = (i == display_count - 1) and remaining == 0
-            prefix = "└─" if is_last else "├─"
-            if cred.is_target:
-                labels = ", ".join(f"{label_color(f)}{target_label(f)}{C.X}" for f in cred.target_files)
-                print(f"  {C.DM}{prefix}{C.X} {C.W}{cred.sam_account_name}{C.X}  {labels}")
-            else:
-                print(f"  {C.DM}{prefix} {cred.sam_account_name}{C.X}")
-        if remaining > 0:
-            hint = f"  {C.DM}(full list in tt-empty-passwords.txt){C.X}" if args.output else ""
-            print(f"  {C.DM}└─ ... and {remaining} more{C.X}{hint}")
+    if show_all or args.show_stats:
+        # Header with crack rate
+        if valid_users:
+            pct = len(cracked_users) / len(valid_users)
+            header("Statistics", f"{C.G}{len(cracked_users)}{C.X}/{len(valid_users)} cracked ({pct*100:.0f}%)")
+        else:
+            header("Statistics")
 
-    if lm_users:
-        print()
-        print(f"  {C.O}⚠ {len(lm_users)} accounts have LM hashes{C.X} {C.DM}(weak legacy format){C.X}")
-        sorted_lm = sorted(lm_users, key=lambda c: (not c.is_target, c.sam_account_name))
-        display_count = min(len(sorted_lm), MAX_DISPLAY)
-        remaining = len(sorted_lm) - display_count
-        for i, cred in enumerate(sorted_lm[:display_count]):
-            is_last = (i == display_count - 1) and remaining == 0
-            prefix = "└─" if is_last else "├─"
-            if cred.is_target:
-                labels = ", ".join(f"{label_color(f)}{target_label(f)}{C.X}" for f in cred.target_files)
-                print(f"  {C.DM}{prefix}{C.X} {C.W}{cred.sam_account_name}{C.X}  {labels}")
-            else:
-                print(f"  {C.DM}{prefix} {cred.sam_account_name}{C.X}")
-        if remaining > 0:
-            hint = f"  {C.DM}(full list in tt-lm-hashes.txt){C.X}" if args.output else ""
-            print(f"  {C.DM}└─ ... and {remaining} more{C.X}{hint}")
+        # Compact stats
+        acct_parts = [f"{len(users)} users", f"{len(machines)} machines"]
+        if null_users:
+            acct_parts.append(f"{len(null_users)} empty")
+        print(f"  {C.DM}Accounts{C.X}   {', '.join(acct_parts)}")
+
+        hash_parts = [f"{len(nt_creds)} NT"]
+        if lm_creds:
+            hash_parts.append(f"{C.Y}{len(lm_creds)} LM (legacy){C.X}")
+        else:
+            hash_parts.append("0 LM")
+        print(f"  {C.DM}Hashes{C.X}     {', '.join(hash_parts)}")
+
+        if valid_users:
+            unique_hashes = len(set(c.hash for c in valid_users if c.hash))
+            unique_cracked = len(set(c.cleartext for c in cracked_users if c.cleartext))
+            print(f"  {C.DM}Unique{C.X}     {unique_cracked}/{unique_hashes} unique password hashes cracked")
+
+        # Security warnings
+        if empty_password_users:
+            print()
+            print(f"  {C.R}⚠ {len(empty_password_users)} accounts have NO PASSWORD{C.X} {C.DM}(often disabled, but verify){C.X}")
+            sorted_empty = sorted(empty_password_users, key=lambda c: (not c.is_target, c.sam_account_name))
+            display_count = min(len(sorted_empty), MAX_DISPLAY)
+            remaining = len(sorted_empty) - display_count
+            for i, cred in enumerate(sorted_empty[:display_count]):
+                is_last = (i == display_count - 1) and remaining == 0
+                prefix = "└─" if is_last else "├─"
+                if cred.is_target:
+                    labels = ", ".join(f"{label_color(f)}{target_label(f)}{C.X}" for f in cred.target_files)
+                    print(f"  {C.DM}{prefix}{C.X} {cred.sam_account_name}  {labels}")
+                else:
+                    print(f"  {C.DM}{prefix} {cred.sam_account_name}{C.X}")
+            if remaining > 0:
+                hint = f"  {C.DM}(full list in tt-empty-passwords.txt){C.X}" if args.output else ""
+                print(f"  {C.DM}└─ ... and {remaining} more{C.X}{hint}")
+
+        if lm_users:
+            print()
+            print(f"  {C.O}⚠ {len(lm_users)} accounts have LM hashes{C.X} {C.DM}(weak legacy format){C.X}")
+            sorted_lm = sorted(lm_users, key=lambda c: (not c.is_target, c.sam_account_name))
+            display_count = min(len(sorted_lm), MAX_DISPLAY)
+            remaining = len(sorted_lm) - display_count
+            for i, cred in enumerate(sorted_lm[:display_count]):
+                is_last = (i == display_count - 1) and remaining == 0
+                prefix = "└─" if is_last else "├─"
+                if cred.is_target:
+                    labels = ", ".join(f"{label_color(f)}{target_label(f)}{C.X}" for f in cred.target_files)
+                    print(f"  {C.DM}{prefix}{C.X} {cred.sam_account_name}  {labels}")
+                else:
+                    print(f"  {C.DM}{prefix} {cred.sam_account_name}{C.X}")
+            if remaining > 0:
+                hint = f"  {C.DM}(full list in tt-lm-hashes.txt){C.X}" if args.output else ""
+                print(f"  {C.DM}└─ ... and {remaining} more{C.X}{hint}")
 
     # ==========================================================================
     # krbtgt Detection — Golden Ticket Risk
     # ==========================================================================
     krbtgt_creds = [c for c in all_credentials
                     if c.sam_account_name.lower() == "krbtgt" and not c.is_history]
-    if krbtgt_creds:
+    if krbtgt_creds and (show_all or args.show_krbtgt):
         any_cracked = any(c.is_cracked for c in krbtgt_creds)
         stat_str = f"{C.R}CRITICAL{C.X}" if any_cracked else f"{C.Y}not cracked{C.X}"
         header("krbtgt — Kerberos Trust Account", stat_str)
@@ -753,11 +775,11 @@ def main():
                 pwd_display = redact(cred.cleartext)
                 right_len = 12 if (args.redact or args.redact_partial) else len(cred.cleartext)
                 dots = " " + "·" * max(WIDTH - left_len - right_len - 2, 1) + " "
-                print(f"  {C.DM}{prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{pwd_display}")
+                print(f"  {C.DM}{prefix}{C.X} {cred.down_level_logon_name}{C.DM}{dots}{C.X}{pwd_display}")
             else:
                 tag = "(not cracked)"
                 dots = " " + "·" * max(WIDTH - left_len - len(tag) - 2, 1) + " "
-                print(f"  {C.DM}{prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.O}{tag}{C.X}")
+                print(f"  {C.DM}{prefix}{C.X} {cred.down_level_logon_name}{C.DM}{dots}{C.O}{tag}{C.X}")
         if any_cracked:
             print()
             print(f"  {C.R}⚠ Cracked krbtgt enables forged Kerberos tickets (Golden Ticket){C.X}")
@@ -819,7 +841,7 @@ def main():
     # ==========================================================================
     # High Value Targets (grouped by target file, then BloodHound groups)
     # ==========================================================================
-    if target_creds or bh_priv_creds:
+    if (target_creds or bh_priv_creds) and (show_all or args.show_targets):
         # Group credentials by target file
         file_to_creds: dict[str, list[Credential]] = {}
         for cred in target_creds:
@@ -877,13 +899,13 @@ def main():
                         right_len = len(cred.cleartext)
                     dots_len = WIDTH - left_len - right_len
                     dots = " " + "·" * max(dots_len - 2, 1) + " "
-                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{pwd_display}")
+                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {cred.down_level_logon_name}{C.DM}{dots}{C.X}{pwd_display}")
                 else:
                     not_cracked = "(not cracked)"
                     right_len = len(not_cracked)
                     dots_len = WIDTH - left_len - right_len
                     dots = " " + "·" * max(dots_len - 2, 1) + " "
-                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{C.O}{not_cracked}{C.X}")
+                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {cred.down_level_logon_name}{C.DM}{dots}{C.X}{C.O}{not_cracked}{C.X}")
 
             # Empty line between file groups (except after last)
             if not is_last_file:
@@ -918,11 +940,11 @@ def main():
                         pwd_display = redact(cred.cleartext)
                         right_len = 12 if (args.redact or args.redact_partial) else len(cred.cleartext)
                         dots = " " + "·" * max(WIDTH - left_len - right_len - 2, 1) + " "
-                        print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{pwd_display}")
+                        print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {cred.down_level_logon_name}{C.DM}{dots}{C.X}{pwd_display}")
                     else:
                         tag = "(not cracked)"
                         dots = " " + "·" * max(WIDTH - left_len - len(tag) - 2, 1) + " "
-                        print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{C.O}{tag}{C.X}")
+                        print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {cred.down_level_logon_name}{C.DM}{dots}{C.X}{C.O}{tag}{C.X}")
 
                 if not is_last_grp:
                     print(f"  {C.DM}│{C.X}")
@@ -931,12 +953,12 @@ def main():
     # Shared Target Credentials
     # ==========================================================================
     has_notable = bool(targets or bh_groups)
-    if has_notable and not target_shared_hashes:
+    if has_notable and not target_shared_hashes and (show_all or args.show_shared):
         header("Shared Target Credentials", "none")
         print(f"  {C.DM}No notable accounts share a password hash with any other account{C.X}")
         print()
 
-    if has_notable and target_shared_hashes:
+    if has_notable and target_shared_hashes and (show_all or args.show_shared):
         total_shared_accounts = sum(len(creds) for creds in target_shared_hashes.values())
         header("Shared Target Credentials", f"{C.G}{len(target_shared_hashes)}{C.X} groups, {total_shared_accounts} accounts")
 
@@ -1043,7 +1065,7 @@ def main():
 
                     right_len = len(plain_lbl)
                     dots = " " + "·" * max(WIDTH - left_len - right_len - 2, 1) + " "
-                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {C.W}{cred.down_level_logon_name}{C.X}{C.DM}{dots}{C.X}{colored_lbl}")
+                    print(f"  {C.DM}{tree_prefix}{cred_prefix}{C.X} {cred.down_level_logon_name}{C.DM}{dots}{C.X}{colored_lbl}")
                 else:
                     not_notable = "(not a target)"
                     dots = " " + "·" * max(WIDTH - left_len - len(not_notable) - 2, 1) + " "
@@ -1071,7 +1093,7 @@ def main():
         if len(domains) > 1:
             cross_domain_hashes[h] = [c for c in creds if c.domain and not c.is_machine]
 
-    if cross_domain_hashes:
+    if cross_domain_hashes and (show_all or args.show_cross_domain):
         total_xd_accounts = sum(len(c) for c in cross_domain_hashes.values())
         header("Cross-Domain Shared Passwords", f"{C.R}{len(cross_domain_hashes)}{C.X} groups, {total_xd_accounts} accounts")
 
@@ -1112,7 +1134,7 @@ def main():
     # Password Analysis
     # ==========================================================================
     cracked_passwords = [c.cleartext for c in all_credentials if c.is_cracked and c.cleartext and not c.is_history]
-    if cracked_passwords:
+    if cracked_passwords and (show_all or args.show_analysis):
         unique_passwords = list(set(cracked_passwords))
         header("Password Analysis", f"{C.G}{len(unique_passwords)}{C.X} unique passwords")
 
@@ -1148,10 +1170,10 @@ def main():
                     if cred.is_target:
                         labels = ", ".join(f"{label_color(f)}({target_label(f)}){C.X}" for f in cred.target_files)
                         labels_visible = len(", ".join(f"({target_label(f)})" for f in cred.target_files))
-                        left_side = f"{C.W}{cred.sam_account_name}{C.X}  {labels}"
+                        left_side = f"{cred.sam_account_name}  {labels}"
                         left_len = 5 + len(cred.sam_account_name) + 2 + labels_visible
                     else:
-                        left_side = f"{C.W}{cred.sam_account_name}{C.X}"
+                        left_side = f"{cred.sam_account_name}"
                         left_len = 5 + len(cred.sam_account_name)
                     # Password on right
                     right_len = len(cred.cleartext)
